@@ -1,16 +1,31 @@
+import argparse
 import pygame
 import sys
 
-SCREEN_W = 1280
-SCREEN_H = 720
+DEFAULT_W = 1280
+DEFAULT_H = 720
 FPS = 60
 TITLE = "qGames"
 BG_COLOR = (25, 35, 60)
 
 
+def parse_args():
+    p = argparse.ArgumentParser(description=TITLE)
+    p.add_argument("--fullscreen", action="store_true")
+    p.add_argument("--width", type=int, default=DEFAULT_W, metavar="W")
+    p.add_argument("--height", type=int, default=DEFAULT_H, metavar="H")
+    return p.parse_args()
+
+
 def main():
+    args = parse_args()
     pygame.init()
-    screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
+
+    if args.fullscreen:
+        screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+    else:
+        screen = pygame.display.set_mode((args.width, args.height))
+
     pygame.display.set_caption(TITLE)
     clock = pygame.time.Clock()
 

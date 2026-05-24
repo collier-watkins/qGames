@@ -12,41 +12,63 @@ qGames is a collection of educational kids games that run natively on a Raspberr
 ## Stack
 
 - **Python 3** + **Pygame 2** — native 2D game framework, no browser/Electron
-- No virtual environment; system pygame via `apt` is preferred for Pi compatibility
+- Only one external dependency: `pygame`. Keep it that way unless there is a strong reason.
+- Install via `apt` (distro-signed, GPG-verified). Do **not** use pip unless apt is unavailable — pip packages are unsigned and subject to supply-chain attacks. The pinned apt package is `python3-pygame=2.5.2-2`.
 
 ## Running
 
 ```bash
-./run.sh          # auto-installs pygame if missing, then launches
-python3 main.py   # direct launch once pygame is installed
-```
-
-Install pygame manually if needed:
-```bash
-sudo apt install python3-pygame
+./run.sh                          # windowed 1280×720 (default)
+./run.sh --fullscreen             # fullscreen at native resolution
+./run.sh --width 800 --height 600 # arbitrary windowed size
+python3 main.py [same flags]      # direct launch, skips apt check
 ```
 
 ## Architecture
 
 ```
-main.py          # Entry point: pygame init, main game loop, screen/scene routing
+main.py          # Entry point: arg parsing, pygame init, main game loop, scene routing
 games/           # One module per game (e.g. games/color_match.py)
 assets/
   fonts/         # .ttf files
-  images/        # .png / .jpg sprites and backgrounds
+  images/        # .png / .jpg sprites
   sounds/        # .wav / .ogg effects and music
 ```
 
 ### Adding a game
 
-1. Create `games/my_game.py` with a class that exposes `update(events)` and `draw(screen)`.
+1. Create `games/my_game.py` with a class exposing `update(events)` and `draw(screen)`.
 2. Import and wire it into the scene router in `main.py`.
 
-Games should never call `pygame.init()` or `pygame.quit()` — that is owned by `main.py`. Each game receives the already-initialized `screen` surface and the current event list each frame.
+Games must never call `pygame.init()` or `pygame.quit()` — those are owned by `main.py`. Each game receives the already-initialized `screen` surface and the current event list each frame.
 
 ### Performance notes for Pi
 
 - Target 60 FPS; cap with `clock.tick(60)`.
-- Prefer solid-color fills and `pygame.draw.*` over large image blits where possible.
+- Prefer solid-color fills and `pygame.draw.*` over large image blits.
 - Pre-load all assets at game startup, not per-frame.
-- Use `pygame.Surface.convert()` / `convert_alpha()` on loaded images immediately after load.
+- Call `.convert()` / `.convert_alpha()` on every loaded image immediately after load.
+
+## Git workflow
+
+After every task is complete, stage all changed files, commit, and push:
+
+```bash
+git add -p                        # review and stage changes
+git commit -m "<type>: <short imperative summary>"
+git push
+```
+
+Commit message format: `<type>: <what changed>` where type is one of `feat`, `fix`, `refactor`, `chore`, or `docs`. Example: `feat: add color-match game with keyboard input`.
+
+## Compiling to a native binary (Raspberry Pi)
+
+PyInstaller bundles the Python runtime + pygame into a single self-contained executable. It must be built **on** the Pi (the output is architecture-specific ARM64):
+
+```bash
+sudo apt install python3-pyinstaller=6.3.0+dfsg-1   # pin version
+pyinstaller --onefile --name qgames main.py
+# output: dist/qgames  — copy this binary anywhere on the Pi
+```
+
+The result is not truly ahead-of-time compiled (Python bytecode still runs inside), but it is a single standalone binary with no runtime dependencies. For true native compilation, Nuitka is an option but significantly more complex to set up.

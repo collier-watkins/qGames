@@ -1,1 +1,3 @@
-pygame>=2.5.0
+# Prefer apt over pip — see CLAUDE.md for rationale.
+# If pip is required: python3 -m pip install --require-hashes -r requirements.txt
+pygame==2.5.2
