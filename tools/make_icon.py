@@ -8,7 +8,7 @@ import pygame
 
 pygame.init()
 
-SIZE = 64
+SIZE = 256
 surf = pygame.Surface((SIZE, SIZE), pygame.SRCALPHA)
 
 # Circular dark background
@@ -21,14 +21,14 @@ COLORS = [
     ( 80, 200, 100),   # green  bottom-left
     (240, 200,  60),   # yellow bottom-right
 ]
-TILE, GAP = 14, 5
+TILE, GAP = 56, 18
 ox = SIZE // 2 - TILE - GAP // 2
 oy = SIZE // 2 - TILE - GAP // 2
 
 for i, color in enumerate(COLORS):
     x = ox + (i % 2) * (TILE + GAP)
     y = oy + (i // 2) * (TILE + GAP)
-    pygame.draw.rect(surf, color, (x, y, TILE, TILE), border_radius=3)
+    pygame.draw.rect(surf, color, (x, y, TILE, TILE), border_radius=12)
 
 out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "assets", "icons", "qgames.png")
