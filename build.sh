@@ -59,6 +59,7 @@ rm -rf build dist "$APP.spec"
     --onefile \
     --name "$APP" \
     --add-data "assets:assets" \
+    --icon "assets/icons/qgames.png" \
     --hidden-import pygame \
     --log-level WARN \
     main.py

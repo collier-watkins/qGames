@@ -3,6 +3,7 @@ import pygame
 import sys
 
 from status_bar import StatusBar
+from util import resource_path
 
 DEFAULT_W = 1280
 DEFAULT_H = 720
@@ -22,6 +23,9 @@ def parse_args():
 def main():
     args = parse_args()
     pygame.init()
+
+    icon = pygame.image.load(resource_path("assets/icons/qgames.png"))
+    pygame.display.set_icon(icon)
 
     if args.fullscreen:
         screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
