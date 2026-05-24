@@ -40,7 +40,10 @@ else
     if [[ ! -x "$BUILD_VENV/bin/pyinstaller" ]]; then
         sudo apt-get install -y python3-venv
         python3 -m venv "$BUILD_VENV"
-        "$BUILD_VENV/bin/pip" install --quiet "pyinstaller==$PYINSTALLER_VER"
+        # pygame must be in the same env so PyInstaller can bundle it
+        "$BUILD_VENV/bin/pip" install --quiet \
+            "pyinstaller==$PYINSTALLER_VER" \
+            "pygame==2.5.2"
     fi
     PYINST=("$BUILD_VENV/bin/pyinstaller")
 fi
