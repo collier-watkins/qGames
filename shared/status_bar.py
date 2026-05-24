@@ -52,7 +52,6 @@ class StatusBar:
     def _rebuild(self):
         self._font = pygame.font.SysFont("monospace", self._font_size)
         self._height = self._font_size + 8
-        # Lay out button rects lazily — real positions set in draw()
         self._plus_rect = pygame.Rect(0, 0, self._height - 4, self._height - 4)
         self._minus_rect = pygame.Rect(0, 0, self._height - 4, self._height - 4)
 
@@ -60,7 +59,6 @@ class StatusBar:
         sw = screen.get_width()
         btn_side = self._height - 4
 
-        # Position buttons from the right edge each frame
         if symbol == "+":
             rect.topleft = (sw - btn_side - _BTN_GAP, bar_y + 2)
         else:

@@ -4,71 +4,127 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-qGames is a collection of educational kids games that run natively on a Raspberry Pi 5 desktop. Games are simple 2D — colors, letters, sounds, patterns, and memory exercises in the style of standard online educational games.
+qGames is a suite of standalone educational games for kids that run natively on a Raspberry Pi 5 desktop. Each game ships as its own binary with its own desktop icon.
 
 **Target hardware:** Raspberry Pi 5 (ARM64, Raspberry Pi OS or Ubuntu)  
 **Dev machine:** Intel x86_64, Ubuntu 24.04
 
 ## Stack
 
-- **Python 3** + **Pygame 2** — native 2D game framework, no browser/Electron
-- Only one external dependency: `pygame`. Keep it that way unless there is a strong reason.
-- Install via `apt` (distro-signed, GPG-verified). Do **not** use pip unless apt is unavailable — pip packages are unsigned and subject to supply-chain attacks. The pinned apt package is `python3-pygame=2.5.2-2`.
+- **Python 3** + **Pygame 2** — native 2D, no browser/Electron
+- One external dependency: `pygame==2.5.2`. Keep it that way.
+- Install via `apt` (distro-signed, GPG-verified): `python3-pygame=2.5.2-2`
+- Do **not** use pip for runtime deps — pip packages are unsigned
 
-## Running
+## Games
+
+| Game | Status | Description |
+|---|---|---|
+| `paint` | done | MS Paint-style canvas with colour palette and PNG export |
+| `memory` | done | 4×4 card pair-matching game |
+| `letters` | stub | Keyboard keys speak letter names (TBD) |
+
+## Running in development
 
 ```bash
-./run.sh                          # windowed 1280×720 (default)
-./run.sh --fullscreen             # fullscreen at native resolution
-./run.sh --width 800 --height 600 # arbitrary windowed size
-python3 main.py [same flags]      # direct launch, skips apt check
+./run.sh paint              # launch paint (auto-installs pygame if needed)
+./run.sh memory
+./run.sh letters
+python3 games/paint/main.py # direct launch, skips apt check
 ```
 
-## Architecture
+## Building native executables
+
+```bash
+./build.sh              # build all games → dist/paint, dist/memory, dist/letters
+./build.sh paint        # build one game
+```
+
+Executables are architecture-specific — build on the target machine (Pi 5 for ARM64).
+
+## Installing desktop launchers
+
+```bash
+./install.sh            # install all games
+./install.sh paint      # install one game
+```
+
+Installs to `~/.local/bin/`, `~/.local/share/icons/`, and `~/.local/share/applications/`.  
+No `sudo` required. Adds the game to the GNOME app menu with its icon.
+
+## Repository structure
 
 ```
-main.py          # Entry point: arg parsing, pygame init, main game loop, scene routing
-games/           # One module per game (e.g. games/color_match.py)
+shared/
+  util.py           # resource_path() — resolves assets in dev and PyInstaller bundles
+  status_bar.py     # StatusBar class (window dimensions, font +/- buttons)
+games/
+  <name>/
+    main.py         # entry point — run directly or via ./run.sh
+    assets/
+      icons/        # <name>.png — 256×256 game icon
 assets/
-  fonts/         # .ttf files
-  images/        # .png / .jpg sprites
-  sounds/        # .wav / .ogg effects and music
+  icons/
+    qgames.png      # suite icon (256×256)
+tools/
+  make_icon.py      # regenerate all game icons (uses pygame, no extra deps)
 ```
 
-### Adding a game
+## Adding a new game
 
-1. Create `games/my_game.py` with a class exposing `update(events)` and `draw(screen)`.
-2. Import and wire it into the scene router in `main.py`.
+1. `mkdir -p games/<name>/assets/icons`
+2. Add an icon entry to `tools/make_icon.py` and run it
+3. Write `games/<name>/main.py` — see any existing game for the pattern:
+   - `sys.path.insert(0, ROOT)` so `shared/` is importable
+   - Load icon with `resource_path("assets/icons/<name>.png", GAME_DIR)`
+   - Use `StatusBar` from `shared.status_bar`
+   - Never call `pygame.init()` more than once; never skip `pygame.quit()`
+4. Add the game name to `ALL_GAMES` in `build.sh`, `install.sh`, and `run.sh`
+5. Add a row to the Games table above
 
-Games must never call `pygame.init()` or `pygame.quit()` — those are owned by `main.py`. Each game receives the already-initialized `screen` surface and the current event list each frame.
+## Shared utilities
 
-### Performance notes for Pi
+### `resource_path(relative, base=None)`
 
-- Target 60 FPS; cap with `clock.tick(60)`.
-- Prefer solid-color fills and `pygame.draw.*` over large image blits.
-- Pre-load all assets at game startup, not per-frame.
-- Call `.convert()` / `.convert_alpha()` on every loaded image immediately after load.
+Resolves asset paths correctly in both dev and PyInstaller bundles.
+
+```python
+GAME_DIR = os.path.dirname(os.path.abspath(__file__))
+icon = pygame.image.load(resource_path("assets/icons/paint.png", GAME_DIR))
+```
+
+In a bundle `sys._MEIPASS` is used automatically; `base` is ignored.
+
+### `StatusBar`
+
+Drawn last each frame so it always sits on top of game content.  
+`status_bar.height` gives the pixel height (varies with font size).
 
 ## Git workflow
 
-After every task is complete, stage all changed files, commit, and push:
+After every task, stage, commit, and push:
 
 ```bash
-git add -p                        # review and stage changes
+git add -p
 git commit -m "<type>: <short imperative summary>"
 git push
 ```
 
-Commit message format: `<type>: <what changed>` where type is one of `feat`, `fix`, `refactor`, `chore`, or `docs`. Example: `feat: add color-match game with keyboard input`.
+Types: `feat`, `fix`, `refactor`, `chore`, `docs`.
 
-## Compiling to a native binary (Raspberry Pi)
+## Performance notes for Pi
 
-PyInstaller bundles the Python runtime + pygame into a single self-contained executable. It must be built **on** the Pi (the output is architecture-specific ARM64):
+- Cap at 60 FPS with `clock.tick(60)`
+- Prefer `pygame.draw.*` over image blits for simple shapes
+- Pre-load assets once at startup; call `.convert()` / `.convert_alpha()` immediately after load
+
+## Compiling to a native binary
+
+PyInstaller bundles the Python runtime + pygame + SDL into one file. Run on the target arch:
 
 ```bash
-sudo apt install python3-pyinstaller=6.3.0+dfsg-1   # pin version
-pyinstaller --onefile --name qgames main.py
-# output: dist/qgames  — copy this binary anywhere on the Pi
+./build.sh <game>
+# output: dist/<game>  — copy to any linux/<arch> machine, no deps needed
 ```
 
-The result is not truly ahead-of-time compiled (Python bytecode still runs inside), but it is a single standalone binary with no runtime dependencies. For true native compilation, Nuitka is an option but significantly more complex to set up.
+For true AOT compilation, Nuitka is an option but significantly more complex.

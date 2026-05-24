@@ -1,36 +1,81 @@
 #!/usr/bin/env python3
-"""Generate assets/icons/qgames.png. Re-run whenever the icon design changes."""
+"""Generate all game icons. Re-run after design changes."""
+import math
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pygame
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 pygame.init()
 
 SIZE = 256
-surf = pygame.Surface((SIZE, SIZE), pygame.SRCALPHA)
+C = SIZE // 2
 
-# Circular dark background
-pygame.draw.circle(surf, (20, 30, 55), (SIZE // 2, SIZE // 2), SIZE // 2)
 
-# 2×2 grid of coloured tiles — represents the educational game cards
-COLORS = [
-    (220,  80,  80),   # red    top-left
-    ( 80, 180, 230),   # blue   top-right
-    ( 80, 200, 100),   # green  bottom-left
-    (240, 200,  60),   # yellow bottom-right
-]
+def new_surf():
+    s = pygame.Surface((SIZE, SIZE), pygame.SRCALPHA)
+    pygame.draw.circle(s, (20, 30, 55), (C, C), C)
+    return s
+
+
+def save(surf, *parts):
+    path = os.path.join(ROOT, *parts)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    pygame.image.save(surf, path)
+    print(f"  {path}")
+
+
+# ── qgames suite icon ─────────────────────────────────────────────────────────
+s = new_surf()
 TILE, GAP = 56, 18
-ox = SIZE // 2 - TILE - GAP // 2
-oy = SIZE // 2 - TILE - GAP // 2
-
-for i, color in enumerate(COLORS):
+ox = C - TILE - GAP // 2
+oy = C - TILE - GAP // 2
+for i, color in enumerate([(220,80,80),(80,180,230),(80,200,100),(240,200,60)]):
     x = ox + (i % 2) * (TILE + GAP)
     y = oy + (i // 2) * (TILE + GAP)
-    pygame.draw.rect(surf, color, (x, y, TILE, TILE), border_radius=12)
+    pygame.draw.rect(s, color, (x, y, TILE, TILE), border_radius=12)
+save(s, "assets", "icons", "qgames.png")
 
-out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   "assets", "icons", "qgames.png")
-pygame.image.save(surf, out)
-print(f"Saved {out}")
+# ── paint ─────────────────────────────────────────────────────────────────────
+s = new_surf()
+# Three overlapping paint blobs in primary colours
+for color, (ox, oy) in [
+    ((210, 60, 60),  (-38, 28)),
+    ((60, 100, 220), ( 38, 28)),
+    ((240, 210, 40), (  0,-36)),
+]:
+    pygame.draw.circle(s, color, (C + ox, C + oy), 64)
+save(s, "games", "paint", "assets", "icons", "paint.png")
+
+# ── memory ────────────────────────────────────────────────────────────────────
+s = new_surf()
+CW, CH, CR = 80, 106, 10
+gap = 14
+# Left card — face down (blue with inner border)
+lx = C - CW - gap // 2
+ly = C - CH // 2
+pygame.draw.rect(s, (55, 95, 210), (lx, ly, CW, CH), border_radius=CR)
+pygame.draw.rect(s, (80, 125, 240), (lx, ly, CW, CH), border_radius=CR, width=3)
+inner = pygame.Rect(lx + 8, ly + 8, CW - 16, CH - 16)
+pygame.draw.rect(s, (80, 125, 240), inner, border_radius=CR - 3, width=2)
+# Right card — face up (white with a star)
+rx = C + gap // 2
+pygame.draw.rect(s, (245, 245, 250), (rx, ly, CW, CH), border_radius=CR)
+scx, scy, sr = rx + CW // 2, ly + CH // 2, 30
+pts = []
+for i in range(10):
+    angle = math.pi / 2 + i * 2 * math.pi / 10
+    r = sr if i % 2 == 0 else sr * 0.42
+    pts.append((scx + r * math.cos(angle), scy - r * math.sin(angle)))
+pygame.draw.polygon(s, (240, 190, 40), pts)
+save(s, "games", "memory", "assets", "icons", "memory.png")
+
+# ── letters ───────────────────────────────────────────────────────────────────
+s = new_surf()
+font = pygame.font.SysFont("sans", 148, bold=True)
+lbl = font.render("A", True, (240, 200, 60))
+s.blit(lbl, (C - lbl.get_width() // 2, C - lbl.get_height() // 2))
+save(s, "games", "letters", "assets", "icons", "letters.png")
+
+print("Done.")
