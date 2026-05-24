@@ -50,10 +50,13 @@ echo "PyInstaller $("${PYINST[@]}" --version)"
 echo ""
 
 # ── 3. Build each game ────────────────────────────────────────────────────────
+# Use absolute paths for all file args — PyInstaller resolves --add-data
+# relative to --workpath, not the project root.
+ROOT="$PWD"
 mkdir -p dist
 
 for GAME in "${GAMES[@]}"; do
-    GDIR="games/$GAME"
+    GDIR="$ROOT/games/$GAME"
     if [[ ! -f "$GDIR/main.py" ]]; then
         echo "WARNING: $GDIR/main.py not found — skipping $GAME"
         continue
@@ -69,17 +72,17 @@ for GAME in "${GAMES[@]}"; do
     "${PYINST[@]}" \
         --onefile \
         --name    "$GAME" \
-        --distpath dist \
-        --workpath "build/$GAME" \
-        --specpath "build/$GAME" \
-        --paths   . \
+        --distpath "$ROOT/dist" \
+        --workpath "$ROOT/build/$GAME" \
+        --specpath "$ROOT/build/$GAME" \
+        --paths   "$ROOT" \
         --add-data "$GDIR/assets:assets" \
         "${ICON_ARGS[@]}" \
         --hidden-import pygame \
         --log-level WARN \
         "$GDIR/main.py"
 
-    echo "  → dist/$GAME  ($(du -sh "dist/$GAME" | cut -f1))"
+    echo "  → dist/$GAME  ($(du -sh "$ROOT/dist/$GAME" | cut -f1))"
 done
 
 echo ""
