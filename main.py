@@ -7,9 +7,9 @@ DEFAULT_H = 720
 FPS = 60
 TITLE = "qGames"
 BG_COLOR = (25, 35, 60)
-STATUS_H = 12
+STATUS_H = 18
 STATUS_COLOR = (15, 22, 42)
-STATUS_TEXT_COLOR = (120, 145, 195)
+STATUS_TEXT_COLOR = (160, 185, 235)
 
 
 def parse_args():
@@ -27,11 +27,11 @@ def main():
     if args.fullscreen:
         screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     else:
-        screen = pygame.display.set_mode((args.width, args.height))
+        screen = pygame.display.set_mode((args.width, args.height), pygame.RESIZABLE)
 
     pygame.display.set_caption(TITLE)
     clock = pygame.time.Clock()
-    status_font = pygame.font.SysFont("monospace", 9)
+    status_font = pygame.font.SysFont("monospace", 12)
 
     running = True
     while running:
