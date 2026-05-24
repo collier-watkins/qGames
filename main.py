@@ -7,6 +7,9 @@ DEFAULT_H = 720
 FPS = 60
 TITLE = "qGames"
 BG_COLOR = (25, 35, 60)
+STATUS_H = 12
+STATUS_COLOR = (15, 22, 42)
+STATUS_TEXT_COLOR = (120, 145, 195)
 
 
 def parse_args():
@@ -28,6 +31,7 @@ def main():
 
     pygame.display.set_caption(TITLE)
     clock = pygame.time.Clock()
+    status_font = pygame.font.SysFont("monospace", 9)
 
     running = True
     while running:
@@ -38,6 +42,12 @@ def main():
                 running = False
 
         screen.fill(BG_COLOR)
+
+        w, h = screen.get_size()
+        pygame.draw.rect(screen, STATUS_COLOR, (0, h - STATUS_H, w, STATUS_H))
+        label = status_font.render(f"{w} × {h}", True, STATUS_TEXT_COLOR)
+        screen.blit(label, (4, h - STATUS_H + 1))
+
         pygame.display.flip()
         clock.tick(FPS)
 
