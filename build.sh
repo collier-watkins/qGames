@@ -16,7 +16,13 @@ PYINSTALLER_VER="6.3.0"   # update here when bumping
 echo "Building $APP  [linux/$ARCH]"
 echo ""
 
-# ── 1. Locate or install PyInstaller ──────────────────────────────────────────
+# ── 1. System build dependencies ─────────────────────────────────────────────
+if ! command -v objdump &>/dev/null; then
+    echo "Installing binutils (required by PyInstaller)..."
+    sudo apt-get install -y binutils
+fi
+
+# ── 2. Locate or install PyInstaller ──────────────────────────────────────────
 # Prefer the distro apt package (GPG-signed). If unavailable, create an
 # isolated build venv and pip-install a pinned version.
 # PyInstaller runs only on the build machine and is never shipped to users.
@@ -42,10 +48,10 @@ fi
 echo "PyInstaller: $("${PYINST[@]}" --version)"
 echo ""
 
-# ── 2. Clean previous artifacts ───────────────────────────────────────────────
+# ── 3. Clean previous artifacts ───────────────────────────────────────────────
 rm -rf build dist "$APP.spec"
 
-# ── 3. Build ──────────────────────────────────────────────────────────────────
+# ── 4. Build ──────────────────────────────────────────────────────────────────
 "${PYINST[@]}" \
     --onefile \
     --name "$APP" \
@@ -54,7 +60,7 @@ rm -rf build dist "$APP.spec"
     --log-level WARN \
     main.py
 
-# ── 4. Report ─────────────────────────────────────────────────────────────────
+# ── 5. Report ─────────────────────────────────────────────────────────────────
 SIZE=$(du -sh "$OUT" | cut -f1)
 echo ""
 echo "  Output : $OUT"
