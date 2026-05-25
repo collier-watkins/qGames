@@ -17,7 +17,8 @@ TITLE = "Memory Match"
 FPS   = 60
 COLS, ROWS    = 4, 4
 CARD_GAP      = 12
-FLIP_BACK_TTL = 75   # frames before unmatched pair flips back
+FLIP_BACK_TTL  = 75  # frames before unmatched pair flips back
+MATCH_ANIM_TTL = 55  # frames of match celebration before going green
 
 C_BG          = (25,  35,  60)
 C_BACK        = (50,  80, 160)
@@ -102,6 +103,23 @@ def _draw_card(screen: pygame.Surface, card: Card):
         pygame.draw.rect(screen, C_BACK_BORDER, inner, border_radius=max(3, br - 4), width=2)
 
 
+def _draw_match_anim(screen: pygame.Surface, card: Card, ttl: int):
+    """Two expanding ripple rings in the pair's colour, fading outward."""
+    color    = PAIR_COLORS[card.pair]
+    progress = 1.0 - ttl / MATCH_ANIM_TTL          # 0 → 1
+    max_r    = math.hypot(card.rect.width, card.rect.height) * 0.65
+
+    for lag in (0.0, 0.35):                         # second ring starts at 35 %
+        p = (progress - lag) / (1.0 - lag)
+        if p <= 0:
+            continue
+        p      = min(p, 1.0)
+        ring_r = int(max_r * p)
+        ring_w = max(1, int(6 * (1.0 - p)))
+        if ring_r > 0:
+            pygame.draw.circle(screen, color, card.rect.center, ring_r, ring_w)
+
+
 def main():
     pygame.init()
 
@@ -116,15 +134,17 @@ def main():
     win_font   = pygame.font.SysFont("sans", 36, bold=True)
 
     def reset():
-        nonlocal cards, flipped, wait_ttl, moves, matches
+        nonlocal cards, flipped, pending, wait_ttl, moves, matches
         cards    = _new_deck()
         flipped  = []
+        pending  = []   # [[idx_a, idx_b, ttl], ...]  — matched, animating
         wait_ttl = 0
         moves    = 0
         matches  = 0
 
     cards    = []
     flipped  = []
+    pending  = []
     wait_ttl = 0
     moves    = 0
     matches  = 0
@@ -145,21 +165,24 @@ def main():
                     reset()
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if wait_ttl == 0 and matches < COLS * ROWS // 2:
+                animating = {idx for e in pending for idx in (e[0], e[1])}
+                if wait_ttl == 0 and not all(c.matched for c in cards):
                     for i, card in enumerate(cards):
                         if (card.rect.collidepoint(event.pos)
-                                and not card.face_up and not card.matched):
+                                and not card.face_up
+                                and not card.matched
+                                and i not in animating):
                             card.face_up = True
                             flipped.append(i)
                             if len(flipped) == 2:
                                 moves += 1
                                 a, b = cards[flipped[0]], cards[flipped[1]]
                                 if a.pair == b.pair:
-                                    a.matched = b.matched = True
-                                    matches  += 1
-                                    flipped   = []
+                                    matches += 1
+                                    pending.append([flipped[0], flipped[1], MATCH_ANIM_TTL])
+                                    flipped  = []
                                 else:
-                                    wait_ttl  = FLIP_BACK_TTL
+                                    wait_ttl = FLIP_BACK_TTL
                             break
 
             status_bar.handle_event(event)
@@ -170,6 +193,13 @@ def main():
                 for i in flipped:
                     cards[i].face_up = False
                 flipped = []
+
+        for entry in pending[:]:
+            entry[2] -= 1
+            if entry[2] <= 0:
+                cards[entry[0]].matched = True
+                cards[entry[1]].matched = True
+                pending.remove(entry)
 
         # ── draw ──────────────────────────────────────────────────────────────
         screen.fill(C_BG)
@@ -184,7 +214,11 @@ def main():
         for card in cards:
             _draw_card(screen, card)
 
-        if matches == COLS * ROWS // 2:
+        for entry in pending:
+            for idx in (entry[0], entry[1]):
+                _draw_match_anim(screen, cards[idx], entry[2])
+
+        if all(c.matched for c in cards):
             msg = win_font.render(
                 f"You won in {moves} moves!  —  press R to play again", True, (120, 240, 130)
             )
