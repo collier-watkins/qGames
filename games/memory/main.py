@@ -142,12 +142,33 @@ def main():
         moves    = 0
         matches  = 0
 
+    def try_flip(idx: int):
+        """Flip the card at grid index idx (shared by mouse and keyboard)."""
+        nonlocal moves, matches, wait_ttl
+        animating = {i for e in pending for i in (e[0], e[1])}
+        card = cards[idx]
+        if (wait_ttl != 0 or all(c.matched for c in cards)
+                or card.face_up or card.matched or idx in animating):
+            return
+        card.face_up = True
+        flipped.append(idx)
+        if len(flipped) == 2:
+            moves += 1
+            a, b = cards[flipped[0]], cards[flipped[1]]
+            if a.pair == b.pair:
+                matches += 1
+                pending.append([flipped[0], flipped[1], MATCH_ANIM_TTL])
+                flipped.clear()
+            else:
+                wait_ttl = FLIP_BACK_TTL
+
     cards    = []
     flipped  = []
     pending  = []
     wait_ttl = 0
     moves    = 0
     matches  = 0
+    cursor   = [0, 0]   # [row, col]
     reset()
 
     running = True
@@ -162,28 +183,24 @@ def main():
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_r:
+                    cursor[:] = [0, 0]
                     reset()
+                elif event.key == pygame.K_UP:
+                    cursor[0] = max(0, cursor[0] - 1)
+                elif event.key == pygame.K_DOWN:
+                    cursor[0] = min(ROWS - 1, cursor[0] + 1)
+                elif event.key == pygame.K_LEFT:
+                    cursor[1] = max(0, cursor[1] - 1)
+                elif event.key == pygame.K_RIGHT:
+                    cursor[1] = min(COLS - 1, cursor[1] + 1)
+                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                    try_flip(cursor[0] * COLS + cursor[1])
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                animating = {idx for e in pending for idx in (e[0], e[1])}
-                if wait_ttl == 0 and not all(c.matched for c in cards):
-                    for i, card in enumerate(cards):
-                        if (card.rect.collidepoint(event.pos)
-                                and not card.face_up
-                                and not card.matched
-                                and i not in animating):
-                            card.face_up = True
-                            flipped.append(i)
-                            if len(flipped) == 2:
-                                moves += 1
-                                a, b = cards[flipped[0]], cards[flipped[1]]
-                                if a.pair == b.pair:
-                                    matches += 1
-                                    pending.append([flipped[0], flipped[1], MATCH_ANIM_TTL])
-                                    flipped  = []
-                                else:
-                                    wait_ttl = FLIP_BACK_TTL
-                            break
+                for i, card in enumerate(cards):
+                    if card.rect.collidepoint(event.pos):
+                        try_flip(i)
+                        break
 
             status_bar.handle_event(event)
 
@@ -217,6 +234,13 @@ def main():
         for entry in pending:
             for idx in (entry[0], entry[1]):
                 _draw_match_anim(screen, cards[idx], entry[2])
+
+        # keyboard cursor highlight
+        cur_card = cards[cursor[0] * COLS + cursor[1]]
+        br = max(6, cur_card.rect.width // 8)
+        pygame.draw.rect(screen, (255, 240, 80),
+                         cur_card.rect.inflate(8, 8),
+                         width=4, border_radius=br + 4)
 
         if all(c.matched for c in cards):
             msg = win_font.render(
