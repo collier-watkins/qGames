@@ -22,6 +22,7 @@ qGames is a suite of standalone educational games for kids that run natively on 
 |---|---|---|
 | `paint` | done | MS Paint-style canvas with colour palette and PNG export |
 | `memory` | done | 4×4 card pair-matching game |
+| `battleship` | done | Single-player naval strategy vs AI (keyboard coordinate entry) |
 | `letters` | stub | Keyboard keys speak letter names (TBD) |
 
 ## Running in development

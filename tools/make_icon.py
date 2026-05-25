@@ -78,4 +78,27 @@ lbl = font.render("A", True, (240, 200, 60))
 s.blit(lbl, (C - lbl.get_width() // 2, C - lbl.get_height() // 2))
 save(s, "games", "letters", "assets", "icons", "letters.png")
 
+# ── battleship ────────────────────────────────────────────────────────────────
+s = new_surf()
+# Ocean background
+pygame.draw.circle(s, (20, 55, 105), (C, C), C - 4)
+# Faint grid
+for i in range(5):
+    x = C - 60 + i * 30
+    pygame.draw.line(s, (30, 70, 130), (x, C - 60), (x, C + 60), 1)
+    y = C - 60 + i * 30
+    pygame.draw.line(s, (30, 70, 130), (C - 60, y), (C + 60, y), 1)
+# Ship hull (horizontal bar)
+pygame.draw.rect(s, (175, 185, 195), (C - 56, C - 16, 112, 32), border_radius=8)
+# Bridge
+pygame.draw.rect(s, (135, 145, 158), (C - 12, C - 28, 24, 12), border_radius=4)
+# Hit markers
+hit_c = (220, 75, 55)
+for hx, hy in [(C - 44, C - 44), (C + 28, C + 30)]:
+    pygame.draw.line(s, hit_c, (hx - 9, hy - 9), (hx + 9, hy + 9), 3)
+    pygame.draw.line(s, hit_c, (hx + 9, hy - 9), (hx - 9, hy + 9), 3)
+# Miss marker (hollow circle)
+pygame.draw.circle(s, (110, 155, 215), (C - 14, C + 44), 8, 3)
+save(s, "games", "battleship", "assets", "icons", "battleship.png")
+
 print("Done.")

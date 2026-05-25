@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-ALL_GAMES=(paint memory letters)
+ALL_GAMES=(paint memory letters battleship)
 GAMES=("${ALL_GAMES[@]}")
 if [[ $# -gt 0 ]]; then
     GAMES=("$@")
@@ -24,11 +24,13 @@ declare -A GAME_NAMES=(
     [paint]="Paint"
     [memory]="Memory Match"
     [letters]="Letter Sounds"
+    [battleship]="Battleship"
 )
 declare -A GAME_COMMENTS=(
     [paint]="Draw and paint freely"
     [memory]="Flip cards and find matching pairs"
     [letters]="Learn letter sounds"
+    [battleship]="Single-player naval strategy game"
 )
 
 for GAME in "${GAMES[@]}"; do

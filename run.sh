@@ -3,7 +3,7 @@ set -e
 cd "$(dirname "$0")"
 
 PYGAME_APT="python3-pygame=2.5.2-2"
-ALL_GAMES=(paint memory letters)
+ALL_GAMES=(paint memory letters battleship)
 
 if [[ $# -eq 0 ]]; then
     echo "Usage: ./run.sh <game> [args...]"
