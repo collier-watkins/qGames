@@ -1,3 +1,4 @@
+import math
 import os
 import random
 import sys
@@ -12,10 +13,10 @@ from shared.util import resource_path
 
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
-TITLE     = "Battleship"
-FPS       = 60
-GRID      = 10
-AI_DELAY  = 75   # frames between player's shot and AI's response
+TITLE    = "Battleship"
+FPS      = 60
+GRID     = 9
+AI_DELAY = 60
 
 SHIP_DEFS = [
     ("Carrier",    5, ( 90, 185, 235)),
@@ -25,33 +26,71 @@ SHIP_DEFS = [
     ("Destroyer",  2, (235, 210,  50)),
 ]
 
-C_BG         = ( 12,  22,  42)
-C_WATER      = ( 18,  46,  90)
-C_GRID_LINE  = ( 30,  62, 118)
-C_LABEL      = (130, 162, 210)
-C_SHIP       = (142, 155, 170)
-C_SHIP_SUNK  = ( 72,  78,  88)
-C_HIT        = (218,  62,  42)
-C_MISS       = ( 55,  95, 162)
-C_CURSOR_ROW = (180, 155,  30)
-C_CURSOR_CEL = (245, 215,  50)
-C_HUD        = (128, 162, 212)
-C_LOG_BG     = ( 14,  26,  50)
-C_LOG_TEXT   = (172, 198, 238)
-C_LOG_GOOD   = ( 95, 225, 115)
-C_LOG_BAD    = (225,  95,  85)
-C_LOG_SUNK   = (235, 162,  42)
-C_PAN_LABEL  = (195, 218, 255)
+# ── Palette ───────────────────────────────────────────────────────────────────
 
-STATE_PLAYER = "player"
-STATE_AI     = "ai"
-STATE_OVER   = "over"
+C_BG          = (  7,  14,  28)
 
-PANEL_GAP  = 20
-LABEL_SZ   = 22
-PAN_LABEL_H = 24
-LOG_LINES  = 6
+# Fleet panel — ocean tactical map
+C_FL_WATER    = ( 14,  42,  82)
+C_FL_GRID     = ( 25,  60, 114)
+C_FL_LABEL    = ( 95, 138, 192)
+C_FL_SHIP     = (138, 152, 168)
+C_FL_SUNK     = ( 62,  68,  78)
+C_FL_HIT      = (210,  52,  38)
+C_FL_HIT_X    = (255, 185, 175)
+C_FL_MISS     = ( 90, 125, 188)
+C_FL_FRAME    = ( 40,  70, 128)
+C_FL_PAN      = (115, 158, 208)
 
+# Radar panel — phosphor CRT green
+C_RD_WATER    = (  2,  18,   5)
+C_RD_ALT      = (  4,  24,   8)
+C_RD_GRID     = (  0,  72,  16)
+C_RD_LABEL    = (  0, 218,  55)
+C_RD_FRAME1   = (  0, 175,  38)
+C_RD_FRAME2   = (  0,  90,  20)
+C_RD_FRAME3   = (  0,  40,   9)
+C_RD_HIT      = (255,  70,  22)
+C_RD_HITGLO   = (255, 155,  50)
+C_RD_MISS1    = (  0, 155,  32)
+C_RD_MISS2    = (  0,  75,  15)
+C_RD_CURSOR   = (  0, 255,  65)
+C_RD_CURSR2   = (  0, 135,  30)
+C_RD_SHIP     = (  0,  95,  22)
+C_RD_PAN      = (  0, 235,  60)
+
+# HUD / log / input
+C_HUD         = (122, 160, 210)
+C_BTN_BG      = ( 22,  42,  82)
+C_BTN_TXT     = (165, 200, 252)
+C_BTN_FRAME   = ( 55,  90, 148)
+C_LOG_BG      = ( 10,  22,  44)
+C_LOG_TEXT    = (165, 194, 234)
+C_LOG_GOOD    = ( 85, 225, 108)
+C_LOG_BAD     = (225,  88,  78)
+C_LOG_SUNK    = (232, 158,  38)
+C_INP         = (  0, 235,  60)
+
+# Enemy status (green tint to link visually to radar)
+C_EN_TITLE    = (  0, 175,  40)
+C_EN_ALIVE    = (  0, 148,  32)
+C_EN_DEAD     = ( 40,  60,  42)
+
+STATE_PLAYER  = "player"
+STATE_AI      = "ai"
+STATE_OVER    = "over"
+
+PANEL_GAP     = 18
+LABEL_SZ      = 22
+PAN_LABEL_H   = 22
+LOG_LINES     = 6
+
+FONT_BASE_DEF = 14
+FONT_BASE_MIN = 10
+FONT_BASE_MAX = 24
+
+
+# ── Data model ────────────────────────────────────────────────────────────────
 
 class Ship:
     __slots__ = ("name", "size", "color", "cells", "hits")
@@ -70,7 +109,7 @@ class Ship:
 
 class Board:
     def __init__(self):
-        self.grid:  list[list]          = [[None] * GRID for _ in range(GRID)]
+        self.grid:  list[list]           = [[None] * GRID for _ in range(GRID)]
         self.shots: set[tuple[int, int]] = set()
         self.ships: list[Ship]           = []
 
@@ -104,7 +143,6 @@ class Board:
                     break
 
     def shoot(self, r: int, c: int) -> str:
-        """Returns 'already', 'miss', 'hit', or 'sunk'."""
         if (r, c) in self.shots:
             return "already"
         self.shots.add((r, c))
@@ -119,7 +157,7 @@ class Board:
 
 
 class AI:
-    """Hunt / target AI: checkerboard hunt + axis-focused targeting."""
+    """Checkerboard hunt + axis-focused target mode."""
 
     def __init__(self):
         self._hunt:    list[tuple[int, int]] = []
@@ -158,9 +196,8 @@ class AI:
     def _rebuild_targets(self, r: int, c: int):
         if len(self._hit_run) >= 2:
             r0, c0 = self._hit_run[0]
-            r1, c1 = self._hit_run[1]
+            r1, _  = self._hit_run[1]
             self._axis = "v" if r0 != r1 else "h"
-
         if self._axis == "h":
             cols = sorted(cc for _, cc in self._hit_run)
             self._targets = [(r, cols[0] - 1), (r, cols[-1] + 1)]
@@ -169,28 +206,11 @@ class AI:
             self._targets = [(rows[0] - 1, c), (rows[-1] + 1, c)]
         else:
             self._targets = [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
-
         self._targets = [p for p in self._targets if _in_bounds(*p)]
 
 
 def _in_bounds(r: int, c: int) -> bool:
     return 0 <= r < GRID and 0 <= c < GRID
-
-
-def _parse_input(text: str) -> tuple[int, int] | None:
-    text = text.strip().upper()
-    if len(text) < 2:
-        return None
-    letter = text[0]
-    if not ('A' <= letter <= 'J'):
-        return None
-    try:
-        num = int(text[1:])
-    except ValueError:
-        return None
-    if not (1 <= num <= 10):
-        return None
-    return (ord(letter) - ord('A'), num - 1)
 
 
 def _row_label(r: int) -> str:
@@ -201,110 +221,270 @@ def _col_label(c: int) -> str:
     return str(c + 1)
 
 
-# ── Drawing ───────────────────────────────────────────────────────────────────
+def _parse_input(text: str) -> tuple[int, int] | None:
+    text = text.strip().upper()
+    if len(text) < 2:
+        return None
+    letter = text[0]
+    max_letter = chr(ord('A') + GRID - 1)
+    if not ('A' <= letter <= max_letter):
+        return None
+    try:
+        num = int(text[1:])
+    except ValueError:
+        return None
+    if not (1 <= num <= GRID):
+        return None
+    return (ord(letter) - ord('A'), num - 1)
 
-def _draw_board(screen: pygame.Surface, board: Board, cell: int,
-                ox: int, oy: int, show_ships: bool,
-                cursor_row: int | None, cursor_col: int | None,
-                fonts: dict):
-    """Draw a 10×10 grid.  ox/oy = top-left of label area."""
+
+def _handle_char(buf: str, ch: str) -> str:
+    """Tolerant input: letter replaces letter, digit replaces digit."""
+    cu = ch.upper()
+    max_letter = chr(ord('A') + GRID - 1)
+    if 'A' <= cu <= max_letter:
+        # Keep existing digit if valid, replace letter
+        suffix = buf[1:] if len(buf) >= 2 else ""
+        return cu + suffix
+    if cu.isdigit():
+        num = int(cu)
+        if 1 <= num <= GRID:
+            # Keep existing letter if present, replace digit
+            prefix = buf[0] if buf and buf[0].isalpha() else ""
+            return prefix + cu
+    return buf
+
+
+def _make_fonts(base: int) -> dict:
+    b = base
+    return {
+        "hud":   pygame.font.SysFont("sans", b + 2, bold=True),
+        "label": pygame.font.SysFont("sans", max(9, b - 1), bold=True),
+        "log":   pygame.font.SysFont("sans", b),
+        "ship":  pygame.font.SysFont("sans", max(9, b - 1)),
+        "pan":   pygame.font.SysFont("sans", b + 2, bold=True),
+        "inp":   pygame.font.SysFont("sans", b + 6, bold=True),
+        "over":  pygame.font.SysFont("sans", b + 30, bold=True),
+        "btn":   pygame.font.SysFont("sans", max(9, b - 2), bold=True),
+        "entit": pygame.font.SysFont("sans", max(9, b - 1), bold=True),
+    }
+
+
+# ── Drawing: fleet panel (ocean map style) ────────────────────────────────────
+
+def _draw_fleet(screen: pygame.Surface, board: Board, cell: int,
+                ox: int, oy: int, fonts: dict):
+    """Small fleet panel: ocean map look. ox/oy = top of col-label row."""
     lf      = fonts["label"]
     grid_px = cell * GRID
 
-    # Ocean
-    pygame.draw.rect(screen, C_WATER,
-                     (ox + LABEL_SZ, oy + LABEL_SZ, grid_px, grid_px))
+    # Ocean fill + thin frame
+    water_r = pygame.Rect(ox + LABEL_SZ, oy + LABEL_SZ, grid_px, grid_px)
+    pygame.draw.rect(screen, C_FL_WATER, water_r)
+    pygame.draw.rect(screen, C_FL_FRAME, water_r, 2)
 
     # Axis labels
     for c in range(GRID):
-        s = lf.render(_col_label(c), True, C_LABEL)
+        s = lf.render(_col_label(c), True, C_FL_LABEL)
         screen.blit(s, (ox + LABEL_SZ + c * cell + cell // 2 - s.get_width() // 2,
                         oy + LABEL_SZ // 2 - s.get_height() // 2))
     for r in range(GRID):
-        s = lf.render(_row_label(r), True, C_LABEL)
+        s = lf.render(_row_label(r), True, C_FL_LABEL)
         screen.blit(s, (ox + LABEL_SZ // 2 - s.get_width() // 2,
                         oy + LABEL_SZ + r * cell + cell // 2 - s.get_height() // 2))
 
-    # Ships
+    # Ships (always shown on fleet panel)
     for ship in board.ships:
-        if not show_ships and not ship.sunk:
-            continue
-        color = C_SHIP_SUNK if ship.sunk else ship.color
+        color = C_FL_SUNK if ship.sunk else ship.color
         for (r, c) in ship.cells:
             cr = pygame.Rect(ox + LABEL_SZ + c * cell + 1,
-                             oy + LABEL_SZ + r * cell + 1,
-                             cell - 2, cell - 2)
+                             oy + LABEL_SZ + r * cell + 1, cell - 2, cell - 2)
             pygame.draw.rect(screen, color, cr, border_radius=max(2, cell // 8))
 
-    # Shots
+    # Shots on fleet (AI shots against player)
     for (r, c) in board.shots:
         ship = board.grid[r][c]
-        cx   = ox + LABEL_SZ + c * cell + cell // 2
-        cy   = oy + LABEL_SZ + r * cell + cell // 2
+        cx = ox + LABEL_SZ + c * cell + cell // 2
+        cy = oy + LABEL_SZ + r * cell + cell // 2
         if ship is not None:
-            rad = max(3, cell // 3)
-            pygame.draw.circle(screen, C_HIT, (cx, cy), rad)
+            rad = max(2, cell // 4)
+            pygame.draw.circle(screen, C_FL_HIT, (cx, cy), rad)
             d  = max(2, cell // 5)
             lw = max(1, cell // 10)
-            pygame.draw.line(screen, (255, 195, 185),
-                             (cx - d, cy - d), (cx + d, cy + d), lw)
-            pygame.draw.line(screen, (255, 195, 185),
-                             (cx + d, cy - d), (cx - d, cy + d), lw)
+            pygame.draw.line(screen, C_FL_HIT_X, (cx-d, cy-d), (cx+d, cy+d), lw)
+            pygame.draw.line(screen, C_FL_HIT_X, (cx+d, cy-d), (cx-d, cy+d), lw)
         else:
             rad = max(2, cell // 6)
-            pygame.draw.circle(screen, C_MISS, (cx, cy), rad, max(1, rad // 2 + 1))
+            pygame.draw.circle(screen, C_FL_MISS, (cx, cy), rad, max(1, rad // 2))
 
     # Grid lines
     for i in range(GRID + 1):
-        pygame.draw.line(screen, C_GRID_LINE,
+        pygame.draw.line(screen, C_FL_GRID,
                          (ox + LABEL_SZ + i * cell, oy + LABEL_SZ),
                          (ox + LABEL_SZ + i * cell, oy + LABEL_SZ + grid_px))
-        pygame.draw.line(screen, C_GRID_LINE,
+        pygame.draw.line(screen, C_FL_GRID,
                          (ox + LABEL_SZ, oy + LABEL_SZ + i * cell),
                          (ox + LABEL_SZ + grid_px, oy + LABEL_SZ + i * cell))
 
-    # Cursor
-    if cursor_row is not None:
-        if cursor_col is not None:
-            # Full cell highlight
-            cx = ox + LABEL_SZ + cursor_col * cell
-            cy = oy + LABEL_SZ + cursor_row * cell
-            pygame.draw.rect(screen, C_CURSOR_CEL,
-                             (cx + 1, cy + 1, cell - 2, cell - 2),
-                             width=max(2, cell // 10))
-        else:
-            # Row highlight (only letter typed so far)
-            cy = oy + LABEL_SZ + cursor_row * cell
-            pygame.draw.rect(screen, C_CURSOR_ROW,
-                             (ox + LABEL_SZ + 1, cy + 1, grid_px - 2, cell - 2),
-                             width=max(1, cell // 14))
 
-
-def _draw_ship_status(screen: pygame.Surface, board: Board,
-                      ox: int, oy: int, cell: int, fonts: dict):
-    sf     = fonts["ship"]
-    box_w  = max(10, min(16, cell - 4))
-    gap    = 3
-    row_h  = max(18, box_w + 7)
-
+def _draw_fleet_status(screen: pygame.Surface, board: Board,
+                       ox: int, oy: int, cell: int, fonts: dict):
+    sf    = fonts["ship"]
+    bw    = max(8, min(13, cell - 4))
+    gap   = 2
+    row_h = max(16, bw + 6)
     for ship in board.ships:
-        name_s = sf.render(ship.name, True,
-                           C_SHIP_SUNK if ship.sunk else ship.color)
+        name_s = sf.render(ship.name, True, C_FL_SUNK if ship.sunk else ship.color)
         screen.blit(name_s, (ox + LABEL_SZ, oy))
-        bx = ox + LABEL_SZ + 86
+        bx = ox + LABEL_SZ + 82
         for i, cell_pos in enumerate(ship.cells):
-            color = C_HIT if cell_pos in ship.hits else (
-                C_SHIP_SUNK if ship.sunk else ship.color)
-            br = pygame.Rect(bx + i * (box_w + gap), oy + 2, box_w, box_w)
+            color = C_FL_HIT if cell_pos in ship.hits else (
+                C_FL_SUNK if ship.sunk else ship.color)
+            br = pygame.Rect(bx + i * (bw + gap), oy + 2, bw, bw)
             pygame.draw.rect(screen, color, br, border_radius=2)
-            pygame.draw.rect(screen, C_GRID_LINE, br, 1, border_radius=2)
+            pygame.draw.rect(screen, C_FL_GRID, br, 1, border_radius=2)
         oy += row_h
 
+
+def _draw_enemy_status(screen: pygame.Surface, board: Board,
+                       ox: int, oy: int, fonts: dict):
+    """Compact enemy ship list in radar green — shows sunk/alive status."""
+    tf    = fonts["entit"]
+    sf    = fonts["ship"]
+    title = tf.render("ENEMY SHIPS", True, C_EN_TITLE)
+    screen.blit(title, (ox, oy))
+    oy += title.get_height() + 6
+    row_h = sf.get_height() + 5
+    for ship in board.ships:
+        color = C_EN_DEAD if ship.sunk else C_EN_ALIVE
+        label = f"✕ {ship.name}" if ship.sunk else f"  {ship.name}"
+        s = sf.render(label, True, color)
+        screen.blit(s, (ox, oy))
+        oy += row_h
+
+
+# ── Drawing: radar panel (phosphor CRT green) ─────────────────────────────────
+
+def _draw_radar(screen: pygame.Surface, board: Board, cell: int,
+                ox: int, oy: int,
+                cursor_row: int | None, cursor_col: int | None,
+                tick: int, fonts: dict):
+    """Large radar screen with phosphor CRT aesthetic.
+    ox/oy = top of col-label row (LABEL_SZ before grid)."""
+    lf      = fonts["label"]
+    grid_px = cell * GRID
+    grid_x  = ox + LABEL_SZ
+    grid_y  = oy + LABEL_SZ
+
+    # ── Water fill with alternating cell shading ──
+    pygame.draw.rect(screen, C_RD_WATER, (grid_x, grid_y, grid_px, grid_px))
+    alt_surf = pygame.Surface((cell, cell), pygame.SRCALPHA)
+    alt_surf.fill((0, 255, 60, 18))
+    for r in range(GRID):
+        for c in range(GRID):
+            if (r + c) % 2 == 0:
+                screen.blit(alt_surf, (grid_x + c * cell, grid_y + r * cell))
+
+    # ── Sunk ship outlines ──
+    for ship in board.ships:
+        if ship.sunk:
+            for (r, c) in ship.cells:
+                cr = pygame.Rect(grid_x + c * cell + 1, grid_y + r * cell + 1,
+                                 cell - 2, cell - 2)
+                pygame.draw.rect(screen, C_RD_SHIP, cr, border_radius=max(2, cell // 10))
+
+    # ── Shots ──
+    pulse = 0.5 + 0.5 * math.sin(tick * 0.07)
+    for (r, c) in board.shots:
+        ship = board.grid[r][c]
+        cx   = grid_x + c * cell + cell // 2
+        cy   = grid_y + r * cell + cell // 2
+        if ship is not None:
+            # Hit: glowing orange/red blast
+            base_r = max(3, cell // 3)
+            for ring in range(4, 0, -1):
+                rr  = base_r + ring * 2
+                col = C_RD_HITGLO if ring >= 3 else C_RD_HIT
+                pygame.draw.circle(screen, col, (cx, cy), rr, max(1, 5 - ring))
+            pygame.draw.circle(screen, C_RD_HIT, (cx, cy), base_r)
+        else:
+            # Miss: concentric sonar rings
+            for ring in range(2, 0, -1):
+                rr  = max(2, cell // 6) + (ring - 1) * max(2, cell // 6)
+                col = C_RD_MISS1 if ring == 1 else C_RD_MISS2
+                pygame.draw.circle(screen, col, (cx, cy), rr, max(1, ring))
+
+    # ── Grid lines ──
+    for i in range(GRID + 1):
+        pygame.draw.line(screen, C_RD_GRID,
+                         (grid_x + i * cell, grid_y),
+                         (grid_x + i * cell, grid_y + grid_px))
+        pygame.draw.line(screen, C_RD_GRID,
+                         (grid_x, grid_y + i * cell),
+                         (grid_x + grid_px, grid_y + i * cell))
+
+    # ── Axis labels ──
+    for c in range(GRID):
+        s = lf.render(_col_label(c), True, C_RD_LABEL)
+        screen.blit(s, (grid_x + c * cell + cell // 2 - s.get_width() // 2,
+                        oy + LABEL_SZ // 2 - s.get_height() // 2))
+    for r in range(GRID):
+        s = lf.render(_row_label(r), True, C_RD_LABEL)
+        screen.blit(s, (ox + LABEL_SZ // 2 - s.get_width() // 2,
+                        grid_y + r * cell + cell // 2 - s.get_height() // 2))
+
+    # ── Cursor ──
+    if cursor_row is not None:
+        glow = int(180 + 75 * pulse)
+        if cursor_col is not None:
+            cc  = (0, glow, int(glow * 0.25))
+            ccx = grid_x + cursor_col * cell
+            ccy = grid_y + cursor_row * cell
+            pygame.draw.rect(screen, cc,
+                             (ccx + 1, ccy + 1, cell - 2, cell - 2),
+                             width=max(2, cell // 9))
+        else:
+            cc  = (0, int(glow * 0.55), int(glow * 0.14))
+            ccy = grid_y + cursor_row * cell
+            pygame.draw.rect(screen, cc,
+                             (grid_x + 1, ccy + 1, grid_px - 2, cell - 2),
+                             width=max(1, cell // 14))
+
+    # ── Scanlines overlay ──
+    scan_h   = grid_px
+    step     = max(2, cell // 10)
+    scan_s   = pygame.Surface((grid_px, scan_h), pygame.SRCALPHA)
+    for sy in range(0, scan_h, step * 2):
+        pygame.draw.rect(scan_s, (0, 0, 0, 28), (0, sy, grid_px, max(1, step - 1)))
+    screen.blit(scan_s, (grid_x, grid_y))
+
+    # ── Frame (layered green borders + corner brackets) ──
+    inner_r = pygame.Rect(grid_x - 2, grid_y - 2, grid_px + 4, grid_px + 4)
+    mid_r   = inner_r.inflate(8, 8)
+    outer_r = mid_r.inflate(8, 8)
+
+    pygame.draw.rect(screen, C_RD_FRAME1, inner_r, 3, border_radius=3)
+    pygame.draw.rect(screen, C_RD_FRAME2, mid_r,   2, border_radius=5)
+    pygame.draw.rect(screen, C_RD_FRAME3, outer_r, 1, border_radius=7)
+
+    # Corner L-bracket accents
+    bl = max(10, cell // 3)
+    for (fx, fy, dx, dy) in (
+        (outer_r.left,  outer_r.top,    1,  1),
+        (outer_r.right, outer_r.top,   -1,  1),
+        (outer_r.left,  outer_r.bottom,  1, -1),
+        (outer_r.right, outer_r.bottom, -1, -1),
+    ):
+        pygame.draw.line(screen, C_RD_FRAME1, (fx, fy), (fx + dx * bl, fy), 2)
+        pygame.draw.line(screen, C_RD_FRAME1, (fx, fy), (fx, fy + dy * bl), 2)
+
+
+# ── Drawing: log ──────────────────────────────────────────────────────────────
 
 def _draw_log(screen: pygame.Surface, log: list, y: int, h: int, sw: int,
               fonts: dict):
     pygame.draw.rect(screen, C_LOG_BG, (0, y, sw, h))
-    pygame.draw.line(screen, C_GRID_LINE, (0, y), (sw, y), 1)
+    pygame.draw.line(screen, (30, 55, 100), (0, y), (sw, y), 1)
     lf  = fonts["log"]
     lh  = lf.get_height() + 3
     row = y + h - lh - 4
@@ -312,6 +492,37 @@ def _draw_log(screen: pygame.Surface, log: list, y: int, h: int, sw: int,
         s = lf.render(text, True, color)
         screen.blit(s, (14, row))
         row -= lh
+
+
+# ── Drawing: font size buttons ────────────────────────────────────────────────
+
+def _draw_font_btns(screen: pygame.Surface, sw: int, hud_h: int,
+                    font_base: int, fonts: dict
+                    ) -> tuple[pygame.Rect, pygame.Rect]:
+    """Draw [A-] [A+] buttons in top-right. Returns (minus_rect, plus_rect)."""
+    bf   = fonts["btn"]
+    bh   = hud_h - 8
+    bw   = max(28, bf.get_height() + 14)
+    gap  = 4
+    by   = 4
+    bx_p = sw - PANEL_GAP - bw
+    bx_m = bx_p - gap - bw
+
+    for bx, label, enabled in (
+        (bx_m, "A-", font_base > FONT_BASE_MIN),
+        (bx_p, "A+", font_base < FONT_BASE_MAX),
+    ):
+        br     = pygame.Rect(bx, by, bw, bh)
+        bg     = C_BTN_BG if enabled else (14, 28, 54)
+        txt_c  = C_BTN_TXT if enabled else (70, 90, 120)
+        pygame.draw.rect(screen, bg, br, border_radius=4)
+        pygame.draw.rect(screen, C_BTN_FRAME if enabled else (35, 55, 90),
+                         br, 1, border_radius=4)
+        s = bf.render(label, True, txt_c)
+        screen.blit(s, (bx + bw // 2 - s.get_width() // 2,
+                        by + bh // 2 - s.get_height() // 2))
+
+    return (pygame.Rect(bx_m, by, bw, bh), pygame.Rect(bx_p, by, bw, bh))
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -327,15 +538,8 @@ def main():
     clock      = pygame.time.Clock()
     status_bar = StatusBar()
 
-    hud_font  = pygame.font.SysFont("sans", 17, bold=True)
-    lbl_font  = pygame.font.SysFont("sans", 13, bold=True)
-    log_font  = pygame.font.SysFont("sans", 15)
-    ship_font = pygame.font.SysFont("sans", 13)
-    pan_font  = pygame.font.SysFont("sans", 16, bold=True)
-    inp_font  = pygame.font.SysFont("sans", 19, bold=True)
-    over_font = pygame.font.SysFont("sans", 44, bold=True)
-
-    fonts = {"label": lbl_font, "log": log_font, "ship": ship_font}
+    font_base = FONT_BASE_DEF
+    fonts     = _make_fonts(font_base)
 
     player_board: Board
     ai_board:     Board
@@ -345,68 +549,94 @@ def main():
     ai_timer:     int
     input_buf:    str
     winner:       str
+    tick:         int
 
     def reset():
-        nonlocal player_board, ai_board, ai_agent, log, state, ai_timer, input_buf, winner
+        nonlocal player_board, ai_board, ai_agent, log, state, ai_timer, \
+                 input_buf, winner, tick
         player_board = Board()
         ai_board     = Board()
         ai_agent     = AI()
         player_board.place_random()
         ai_board.place_random()
-        log       = [("Game start! Type a coordinate (e.g. B3 or J10) then press Enter to fire.",
+        log       = [("Game start! Type a coordinate (e.g. B4) then press Enter to fire.",
                       C_LOG_TEXT)]
         state     = STATE_PLAYER
         ai_timer  = 0
         input_buf = ""
         winner    = ""
+        tick      = 0
 
     reset()
 
     running = True
     while running:
+        tick    += 1
         sw, sh   = screen.get_size()
         status_h = status_bar.height
 
         # ── Layout ────────────────────────────────────────────────────────────
-        HUD_H       = 42
-        LOG_H       = max(80, min(125, sh // 6))
-        SHIP_INFO_H = len(SHIP_DEFS) * 21 + 10
+        HUD_H  = 34
+        LOG_H  = max(72, min(108, sh // 7))
+        avail_h = sh - status_h - HUD_H - LOG_H - 8
 
-        avail_h = sh - status_h - HUD_H - PAN_LABEL_H - LOG_H - 18
-        panel_w = (sw - PANEL_GAP * 3) // 2
+        # Radar: fill most of available height, cap at 60% screen width
+        rd_max_h = avail_h - PAN_LABEL_H - LABEL_SZ - 6
+        rd_max_w = (sw * 60 // 100 - LABEL_SZ - PANEL_GAP)
+        rd_cell  = max(14, min(rd_max_h // GRID, rd_max_w // GRID))
+        rd_px    = rd_cell * GRID
 
-        max_cell_w = max(6, (panel_w - LABEL_SZ - 4) // GRID)
-        max_cell_h = max(6, (avail_h - SHIP_INFO_H - LABEL_SZ) // GRID)
-        cell    = min(max_cell_w, max_cell_h)
-        grid_px = cell * GRID
+        # Radar position: right side, vertically centered in working area
+        rd_ox  = sw - PANEL_GAP - LABEL_SZ - rd_px
+        rd_oy  = HUD_H + (avail_h - PAN_LABEL_H - LABEL_SZ - rd_px) // 2
 
-        ox_L = PANEL_GAP
-        ox_R = PANEL_GAP * 2 + panel_w
-        oy   = HUD_H + 4               # panel label top
-        b_oy = oy + PAN_LABEL_H        # board top (col/row label origin)
+        # Fleet: top-left corner, ~36% of radar cell
+        fl_cell = max(10, rd_cell * 36 // 100)
+        fl_px   = fl_cell * GRID
+        fl_ox   = PANEL_GAP
+        fl_oy   = HUD_H + 4 + PAN_LABEL_H    # start of col-label row
 
-        ship_oy = b_oy + LABEL_SZ + grid_px + 6
-        log_y   = sh - status_h - LOG_H
+        fl_status_y = fl_oy + LABEL_SZ + fl_px + 5
+
+        # Enemy status: below fleet status in the left column
+        ship_row_h   = fonts["ship"].get_height() + 5
+        fl_total_h   = (fl_oy + LABEL_SZ + fl_px
+                        + len(SHIP_DEFS) * (max(16, fl_cell - 4 + 6)) + 10)
+        en_status_y  = fl_total_h + 12
+
+        log_y = sh - status_h - LOG_H
 
         # ── Cursor from input buffer ───────────────────────────────────────────
         cur_row: int | None = None
         cur_col: int | None = None
         if input_buf and state == STATE_PLAYER:
             ch = input_buf[0].upper()
-            if 'A' <= ch <= 'J':
+            if 'A' <= ch <= chr(ord('A') + GRID - 1):
                 cur_row = ord(ch) - ord('A')
                 if len(input_buf) >= 2:
                     try:
                         num = int(input_buf[1:])
-                        if 1 <= num <= 10:
+                        if 1 <= num <= GRID:
                             cur_col = num - 1
                     except ValueError:
                         pass
 
         # ── Events ────────────────────────────────────────────────────────────
+        minus_rect = plus_rect = pygame.Rect(0, 0, 0, 0)  # filled during draw
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if minus_rect.collidepoint(event.pos):
+                    if font_base > FONT_BASE_MIN:
+                        font_base -= 1
+                        fonts = _make_fonts(font_base)
+                elif plus_rect.collidepoint(event.pos):
+                    if font_base < FONT_BASE_MAX:
+                        font_base += 1
+                        fonts = _make_fonts(font_base)
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -421,41 +651,36 @@ def main():
                         if coord is None:
                             if input_buf:
                                 log.append(
-                                    (f"'{input_buf}' is not valid — enter letter A–J then number 1–10.",
+                                    (f"'{input_buf}' not valid — type a letter A–{_row_label(GRID-1)}"
+                                     f" then a number 1–{GRID}.",
                                      C_LOG_BAD))
                         else:
                             r, c   = coord
                             result = ai_board.shoot(r, c)
                             label  = f"{_row_label(r)}{_col_label(c)}"
                             if result == "already":
-                                log.append(("You already fired there!", C_LOG_BAD))
+                                log.append(("Already fired there — pick another square.", C_LOG_BAD))
                             else:
                                 input_buf = ""
                                 if result == "miss":
-                                    log.append((f"You fired at {label} — miss.", C_LOG_TEXT))
+                                    log.append((f"You fire at {label} — miss.", C_LOG_TEXT))
                                 elif result == "hit":
-                                    log.append((f"You fired at {label} — HIT!", C_LOG_GOOD))
+                                    log.append((f"You fire at {label} — HIT!", C_LOG_GOOD))
                                 elif result == "sunk":
                                     ship = ai_board.grid[r][c]
-                                    log.append((f"You sank the enemy {ship.name}!", C_LOG_SUNK))
-
+                                    log.append((f"You fire at {label} — SUNK the {ship.name}!",
+                                                C_LOG_SUNK))
                                 if ai_board.all_sunk():
                                     state  = STATE_OVER
                                     winner = "player"
                                     log.append(
-                                        ("YOU WIN! All enemy ships destroyed. Press R to play again.",
+                                        ("ALL ENEMY SHIPS DESTROYED — YOU WIN!  Press R to play again.",
                                          C_LOG_GOOD))
                                 else:
                                     state    = STATE_AI
                                     ai_timer = AI_DELAY
                     else:
-                        ch = event.unicode.upper()
-                        if len(input_buf) == 0 and 'A' <= ch <= 'J':
-                            input_buf = ch
-                        elif len(input_buf) == 1 and ch.isdigit():
-                            input_buf += ch
-                        elif len(input_buf) == 2 and ch == '0' and input_buf[1] == '1':
-                            input_buf += ch   # "10"
+                        input_buf = _handle_char(input_buf, event.unicode)
 
             status_bar.handle_event(event)
 
@@ -467,62 +692,68 @@ def main():
                 result = player_board.shoot(r, c)
                 ai_agent.record(r, c, result)
                 label  = f"{_row_label(r)}{_col_label(c)}"
-
                 if result == "miss":
                     log.append((f"Enemy fires at {label} — miss.", C_LOG_TEXT))
                 elif result == "hit":
                     log.append((f"Enemy fires at {label} — hit your ship!", C_LOG_BAD))
                 elif result == "sunk":
                     ship = player_board.grid[r][c]
-                    log.append((f"Enemy sank your {ship.name}!", C_LOG_SUNK))
-
+                    log.append((f"Enemy fires at {label} — sunk your {ship.name}!", C_LOG_SUNK))
                 if player_board.all_sunk():
                     state  = STATE_OVER
                     winner = "ai"
                     log.append(
-                        ("GAME OVER — all your ships were sunk. Press R to play again.",
-                         C_LOG_BAD))
+                        ("ALL YOUR SHIPS SUNK — GAME OVER.  Press R to play again.", C_LOG_BAD))
                 else:
                     state = STATE_PLAYER
 
         # ── Draw ──────────────────────────────────────────────────────────────
         screen.fill(C_BG)
 
-        # HUD
+        # Fleet panel label
+        pf = fonts["pan"]
+        fl_title = pf.render("YOUR FLEET", True, C_FL_PAN)
+        screen.blit(fl_title, (fl_ox + LABEL_SZ, HUD_H + 4))
+
+        # Fleet board
+        _draw_fleet(screen, player_board, fl_cell, fl_ox, fl_oy, fonts)
+        _draw_fleet_status(screen, player_board, fl_ox, fl_status_y, fl_cell, fonts)
+
+        # Enemy status (left column, below fleet)
+        if en_status_y + 10 < log_y - 10:
+            _draw_enemy_status(screen, ai_board, fl_ox + LABEL_SZ, en_status_y, fonts)
+
+        # Radar panel label
+        rd_title_s = pf.render("ENEMY WATERS", True, C_RD_PAN)
+        rd_title_x = rd_ox + LABEL_SZ + (rd_px - rd_title_s.get_width()) // 2
+        screen.blit(rd_title_s, (rd_title_x, rd_oy - PAN_LABEL_H + 2))
+
+        # Radar board
+        _draw_radar(screen, ai_board, rd_cell, rd_ox, rd_oy,
+                    cur_row, cur_col, tick, fonts)
+
+        # HUD strip
+        hf = fonts["hud"]
         if state == STATE_OVER:
             hud_str = "Game over — press R to play again"
         elif state == STATE_AI:
-            hud_str = "Battleship  ·  Enemy is thinking…  ·  R = restart"
+            hud_str = "Enemy is targeting…"
         else:
             buf_disp = input_buf if input_buf else "?"
-            hud_str = (f"Battleship  ·  Your turn: type coordinate ({buf_disp})"
-                       f" + Enter  ·  Backspace = clear  ·  R = restart")
-        hud_s = hud_font.render(hud_str, True, C_HUD)
-        screen.blit(hud_s, (sw // 2 - hud_s.get_width() // 2, 12))
+            hud_str  = f"Your turn — target: {buf_disp}  · Enter to fire · R = restart"
+        hud_s = hf.render(hud_str, True, C_HUD)
+        screen.blit(hud_s, (PANEL_GAP, HUD_H // 2 - hud_s.get_height() // 2))
 
-        # Panel labels
-        for label_str, ox in (("YOUR FLEET", ox_L), ("ENEMY WATERS", ox_R)):
-            s = pan_font.render(label_str, True, C_PAN_LABEL)
-            screen.blit(s, (ox + LABEL_SZ + (grid_px - s.get_width()) // 2, oy))
+        minus_rect, plus_rect = _draw_font_btns(screen, sw, HUD_H, font_base, fonts)
 
-        # Boards
-        _draw_board(screen, player_board, cell, ox_L, b_oy,
-                    show_ships=True, cursor_row=None, cursor_col=None, fonts=fonts)
-        _draw_board(screen, ai_board, cell, ox_R, b_oy,
-                    show_ships=False, cursor_row=cur_row, cursor_col=cur_col, fonts=fonts)
-
-        # Ship status
-        _draw_ship_status(screen, player_board, ox_L, ship_oy, cell, fonts)
-        _draw_ship_status(screen, ai_board,     ox_R, ship_oy, cell, fonts)
-
-        # Input display (above log, centered)
+        # Input display (left column, above log, in radar green)
         if state == STATE_PLAYER:
-            cursor_blink = (pygame.time.get_ticks() // 500) % 2 == 0
-            display_buf  = input_buf + ("_" if cursor_blink else " ")
-            inp_s = inp_font.render(f"Target: {display_buf}", True, C_CURSOR_CEL)
-            screen.blit(inp_s,
-                        (sw // 2 - inp_s.get_width() // 2,
-                         log_y - inp_s.get_height() - 5))
+            blink    = (pygame.time.get_ticks() // 500) % 2 == 0
+            disp_buf = input_buf + ("▌" if blink else " ")
+            inp_s    = fonts["inp"].render(f"► {disp_buf}", True, C_INP)
+            inp_x    = rd_ox // 2 - inp_s.get_width() // 2
+            inp_y    = log_y - inp_s.get_height() - 6
+            screen.blit(inp_s, (max(PANEL_GAP, inp_x), inp_y))
 
         # Log
         _draw_log(screen, log, log_y, LOG_H, sw, fonts)
@@ -531,16 +762,16 @@ def main():
         if state == STATE_OVER:
             ov_color = C_LOG_GOOD if winner == "player" else C_LOG_BAD
             ov_text  = "YOU WIN!" if winner == "player" else "YOU LOSE!"
-            ov_s     = over_font.render(ov_text, True, ov_color)
+            ov_s     = fonts["over"].render(ov_text, True, ov_color)
             ox_ov    = sw // 2 - ov_s.get_width() // 2
             oy_ov    = sh // 2 - ov_s.get_height()
-            bg_r     = pygame.Rect(ox_ov - 24, oy_ov - 12,
-                                   ov_s.get_width() + 48, ov_s.get_height() + 24)
-            pygame.draw.rect(screen, (8, 14, 32), bg_r, border_radius=12)
+            bg_r     = pygame.Rect(ox_ov - 28, oy_ov - 14,
+                                   ov_s.get_width() + 56, ov_s.get_height() + 28)
+            pygame.draw.rect(screen, (6, 12, 26), bg_r, border_radius=14)
             screen.blit(ov_s, (ox_ov, oy_ov))
-            sub_s = hud_font.render("Press R to play again", True, C_HUD)
+            sub_s = hf.render("Press R to play again", True, C_HUD)
             screen.blit(sub_s, (sw // 2 - sub_s.get_width() // 2,
-                                oy_ov + ov_s.get_height() + 4))
+                                oy_ov + ov_s.get_height() + 6))
 
         status_bar.draw(screen)
         pygame.display.flip()
