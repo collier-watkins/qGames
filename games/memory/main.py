@@ -1,6 +1,7 @@
 import math
 import os
 import random
+import secrets
 import sys
 
 import pygame
@@ -53,7 +54,10 @@ class Card:
 
 def _new_deck() -> list[Card]:
     pairs = list(range(COLS * ROWS // 2)) * 2
-    random.shuffle(pairs)
+    # Fisher-Yates using OS entropy for each swap (secrets.randbelow → os.urandom)
+    for i in range(len(pairs) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        pairs[i], pairs[j] = pairs[j], pairs[i]
     return [Card(p) for p in pairs]
 
 
