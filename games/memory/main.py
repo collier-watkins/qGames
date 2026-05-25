@@ -185,16 +185,16 @@ def main():
                 elif event.key == pygame.K_r:
                     cursor[:] = [0, 0]
                     reset()
-                elif event.key == pygame.K_UP:
-                    cursor[0] = max(0, cursor[0] - 1)
-                elif event.key == pygame.K_DOWN:
-                    cursor[0] = min(ROWS - 1, cursor[0] + 1)
-                elif event.key == pygame.K_LEFT:
-                    cursor[1] = max(0, cursor[1] - 1)
-                elif event.key == pygame.K_RIGHT:
-                    cursor[1] = min(COLS - 1, cursor[1] + 1)
-                elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                    try_flip(cursor[0] * COLS + cursor[1])
+                # elif event.key == pygame.K_UP:
+                #     cursor[0] = max(0, cursor[0] - 1)
+                # elif event.key == pygame.K_DOWN:
+                #     cursor[0] = min(ROWS - 1, cursor[0] + 1)
+                # elif event.key == pygame.K_LEFT:
+                #     cursor[1] = max(0, cursor[1] - 1)
+                # elif event.key == pygame.K_RIGHT:
+                #     cursor[1] = min(COLS - 1, cursor[1] + 1)
+                # elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                #     try_flip(cursor[0] * COLS + cursor[1])
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for i, card in enumerate(cards):
@@ -235,12 +235,12 @@ def main():
             for idx in (entry[0], entry[1]):
                 _draw_match_anim(screen, cards[idx], entry[2])
 
-        # keyboard cursor highlight
-        cur_card = cards[cursor[0] * COLS + cursor[1]]
-        br = max(6, cur_card.rect.width // 8)
-        pygame.draw.rect(screen, (255, 240, 80),
-                         cur_card.rect.inflate(8, 8),
-                         width=4, border_radius=br + 4)
+        # keyboard cursor highlight (disabled)
+        # cur_card = cards[cursor[0] * COLS + cursor[1]]
+        # br = max(6, cur_card.rect.width // 8)
+        # pygame.draw.rect(screen, (255, 240, 80),
+        #                  cur_card.rect.inflate(8, 8),
+        #                  width=4, border_radius=br + 4)
 
         if all(c.matched for c in cards):
             msg = win_font.render(
