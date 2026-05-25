@@ -85,9 +85,10 @@ LABEL_SZ      = 22
 PAN_LABEL_H   = 22
 LOG_LINES     = 6
 
-FONT_BASE_DEF = 14
-FONT_BASE_MIN = 10
-FONT_BASE_MAX = 24
+FONT_BASE_DEF = 19
+FONT_BASE_MIN = 11
+FONT_BASE_MAX = 30
+FONT_STEP     = 2
 
 
 # ── Data model ────────────────────────────────────────────────────────────────
@@ -496,33 +497,23 @@ def _draw_log(screen: pygame.Surface, log: list, y: int, h: int, sw: int,
 
 # ── Drawing: font size buttons ────────────────────────────────────────────────
 
-def _draw_font_btns(screen: pygame.Surface, sw: int, hud_h: int,
-                    font_base: int, fonts: dict
-                    ) -> tuple[pygame.Rect, pygame.Rect]:
-    """Draw [A-] [A+] buttons in top-right. Returns (minus_rect, plus_rect)."""
-    bf   = fonts["btn"]
-    bh   = hud_h - 8
-    bw   = max(28, bf.get_height() + 14)
-    gap  = 4
-    by   = 4
-    bx_p = sw - PANEL_GAP - bw
-    bx_m = bx_p - gap - bw
-
-    for bx, label, enabled in (
-        (bx_m, "A-", font_base > FONT_BASE_MIN),
-        (bx_p, "A+", font_base < FONT_BASE_MAX),
+def _draw_font_btns(screen: pygame.Surface,
+                    minus_rect: pygame.Rect, plus_rect: pygame.Rect,
+                    font_base: int, fonts: dict):
+    """Draw [A-] [A+] buttons using pre-computed rects."""
+    bf = fonts["btn"]
+    for br, label, enabled in (
+        (minus_rect, "A-", font_base > FONT_BASE_MIN),
+        (plus_rect,  "A+", font_base < FONT_BASE_MAX),
     ):
-        br     = pygame.Rect(bx, by, bw, bh)
-        bg     = C_BTN_BG if enabled else (14, 28, 54)
-        txt_c  = C_BTN_TXT if enabled else (70, 90, 120)
+        bg    = C_BTN_BG if enabled else (14, 28, 54)
+        txt_c = C_BTN_TXT if enabled else (70, 90, 120)
         pygame.draw.rect(screen, bg, br, border_radius=4)
         pygame.draw.rect(screen, C_BTN_FRAME if enabled else (35, 55, 90),
                          br, 1, border_radius=4)
         s = bf.render(label, True, txt_c)
-        screen.blit(s, (bx + bw // 2 - s.get_width() // 2,
-                        by + bh // 2 - s.get_height() // 2))
-
-    return (pygame.Rect(bx_m, by, bw, bh), pygame.Rect(bx_p, by, bw, bh))
+        screen.blit(s, (br.x + br.w // 2 - s.get_width() // 2,
+                        br.y + br.h // 2 - s.get_height() // 2))
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -606,6 +597,16 @@ def main():
 
         log_y = sh - status_h - LOG_H
 
+        # ── Font button geometry (computed before events so clicks register) ───
+        _bf    = fonts["btn"]
+        _bh    = max(22, HUD_H - 8)
+        _bw    = max(32, _bf.get_height() + 18)
+        _by    = (HUD_H - _bh) // 2
+        _bx_p  = sw - PANEL_GAP - _bw
+        _bx_m  = _bx_p - 4 - _bw
+        minus_rect = pygame.Rect(_bx_m, _by, _bw, _bh)
+        plus_rect  = pygame.Rect(_bx_p, _by, _bw, _bh)
+
         # ── Cursor from input buffer ───────────────────────────────────────────
         cur_row: int | None = None
         cur_col: int | None = None
@@ -622,8 +623,6 @@ def main():
                         pass
 
         # ── Events ────────────────────────────────────────────────────────────
-        minus_rect = plus_rect = pygame.Rect(0, 0, 0, 0)  # filled during draw
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -631,11 +630,11 @@ def main():
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if minus_rect.collidepoint(event.pos):
                     if font_base > FONT_BASE_MIN:
-                        font_base -= 1
+                        font_base = max(FONT_BASE_MIN, font_base - FONT_STEP)
                         fonts = _make_fonts(font_base)
                 elif plus_rect.collidepoint(event.pos):
                     if font_base < FONT_BASE_MAX:
-                        font_base += 1
+                        font_base = min(FONT_BASE_MAX, font_base + FONT_STEP)
                         fonts = _make_fonts(font_base)
 
             elif event.type == pygame.KEYDOWN:
@@ -744,7 +743,7 @@ def main():
         hud_s = hf.render(hud_str, True, C_HUD)
         screen.blit(hud_s, (PANEL_GAP, HUD_H // 2 - hud_s.get_height() // 2))
 
-        minus_rect, plus_rect = _draw_font_btns(screen, sw, HUD_H, font_base, fonts)
+        _draw_font_btns(screen, minus_rect, plus_rect, font_base, fonts)
 
         # Input display (left column, above log, in radar green)
         if state == STATE_PLAYER:
