@@ -1,4 +1,3 @@
-import json
 import os
 import threading
 
@@ -33,8 +32,8 @@ def _load_config() -> dict:
     return cfg
 
 
-def publish(subtopic: str, payload: dict) -> None:
-    """Fire-and-forget MQTT publish. Silent no-op if unconfigured or paho absent."""
+def publish(subtopic: str, value) -> None:
+    """Fire-and-forget MQTT publish of a single scalar value. Silent no-op if unconfigured or paho absent."""
     cfg = _load_config()
     if not cfg["MQTT_BROKER"]:
         return
@@ -48,7 +47,7 @@ def publish(subtopic: str, payload: dict) -> None:
                 auth = {"username": cfg["MQTT_USERNAME"], "password": cfg["MQTT_PASSWORD"]}
             mqtt_pub.single(
                 topic,
-                payload=json.dumps(payload),
+                payload=str(value),
                 hostname=cfg["MQTT_BROKER"],
                 port=int(cfg["MQTT_PORT"]),
                 auth=auth,
