@@ -148,6 +148,9 @@ class Toolbar:
 
         self._font_sz = 0
         self._font    = None
+        self._txt     = {}          # pre-rendered static label surfaces
+        self._brush_px_surf = None  # cached f"{brush}px" surface
+        self._brush_px_val  = -1
         self._refresh_font()
 
     def _refresh_font(self):
@@ -155,6 +158,30 @@ class Toolbar:
         if sz != self._font_sz:
             self._font    = pygame.font.SysFont("sans", sz)
             self._font_sz = sz
+            f = self._font
+            # Pre-render every static label — these never change at runtime.
+            self._txt = {
+                "P":      f.render("P",        True, (148, 148, 162)),
+                "B":      f.render("B",        True, (148, 148, 162)),
+                "minus":  f.render("−",        True, _CTXT),
+                "plus":   f.render("+",        True, _CTXT),
+                "tbp":    f.render("+",        True, (148, 148, 165)),
+                "tbm":    f.render("−",        True, (148, 148, 165)),
+                "save":   f.render("Save ⌃S",  True, _CTXT),
+                "clear":  f.render("Clear C",  True, _CTXT),
+                "undo_e": f.render("Undo",     True, _CTXT),
+                "undo_d": f.render("Undo",     True, _CTXTD),
+                "redo_e": f.render("Redo",     True, _CTXT),
+                "redo_d": f.render("Redo",     True, _CTXTD),
+            }
+            self._brush_px_val = -1  # invalidate brush size cache
+
+    def _brush_px(self):
+        if self.brush != self._brush_px_val:
+            self._brush_px_surf = self._font.render(
+                f"{self.brush}px", True, (165, 165, 165))
+            self._brush_px_val = self.brush
+        return self._brush_px_surf
 
     @property
     def color(self):
@@ -213,17 +240,16 @@ class Toolbar:
     def draw(self, screen, can_undo=False, can_redo=False):
         H     = self.height
         sw    = screen.get_width()
-        font  = self._font
+        t     = self._txt
         mouse = pygame.mouse.get_pos()
         cy    = H // 2
 
         pygame.draw.rect(screen, _CB, (0, 0, sw, H))
 
-        # ── per-height values ─────────────────────────────────────────────
-        TBH    = max(28, H - 22)                   # tool button height
-        SBW    = max(20, min(44, H - 48))           # small ± button square
-        MBH    = max(26, H - 26)                   # main button height
-        TBSZ   = max(18, min(28, H // 4))          # toolbar ± square size
+        TBH    = max(28, H - 22)
+        SBW    = max(20, min(44, H - 48))
+        MBH    = max(26, H - 26)
+        TBSZ   = max(18, min(28, H // 4))
         icon_sz = max(14, min(34, TBH - 18))
         br6    = 6
         sy     = (H - _SW) // 2
@@ -247,9 +273,9 @@ class Toolbar:
         # ── Tool buttons with icons ───────────────────────────────────────
         ty = (H - TBH) // 2
         self._tool_rects = {}
-        for tool_id, draw_fn, key_hint in (
-            (TOOL_BRUSH,  _icon_brush,  "P"),
-            (TOOL_BUCKET, _icon_bucket, "B"),
+        for tool_id, draw_fn, lbl_surf in (
+            (TOOL_BRUSH,  _icon_brush,  t["P"]),
+            (TOOL_BUCKET, _icon_bucket, t["B"]),
         ):
             r      = pygame.Rect(x, ty, _TBW, TBH)
             active = self.tool == tool_id
@@ -260,9 +286,8 @@ class Toolbar:
                 pygame.draw.rect(screen, (120, 160, 230), r, width=2, border_radius=br6)
             icon_cx = r.x + icon_sz // 2 + 5
             draw_fn(screen, icon_cx, r.centery, icon_sz, _CTXT)
-            hint = font.render(key_hint, True, (148, 148, 162))
-            screen.blit(hint, (r.right - hint.get_width() - 5,
-                               r.centery - hint.get_height() // 2))
+            screen.blit(lbl_surf, (r.right - lbl_surf.get_width() - 5,
+                                   r.centery - lbl_surf.get_height() // 2))
             x += _TBW + _PAD
         x += _PAD
 
@@ -271,21 +296,21 @@ class Toolbar:
         self._size_minus = pygame.Rect(x, sby, SBW, SBW)
         c = _CBTNH if self._size_minus.collidepoint(mouse) else _CBTN
         pygame.draw.rect(screen, c, self._size_minus, border_radius=4)
-        m = font.render("−", True, _CTXT)
+        m = t["minus"]
         screen.blit(m, (self._size_minus.centerx - m.get_width() // 2,
-                         self._size_minus.centery - m.get_height() // 2))
+                        self._size_minus.centery - m.get_height() // 2))
         x += SBW + 4
 
-        sz_t = font.render(f"{self.brush}px", True, (165, 165, 165))
+        sz_t = self._brush_px()
         screen.blit(sz_t, (x, cy - sz_t.get_height() // 2))
         x += max(36, sz_t.get_width() + 4)
 
         self._size_plus = pygame.Rect(x, sby, SBW, SBW)
         c = _CBTNH if self._size_plus.collidepoint(mouse) else _CBTN
         pygame.draw.rect(screen, c, self._size_plus, border_radius=4)
-        p = font.render("+", True, _CTXT)
+        p = t["plus"]
         screen.blit(p, (self._size_plus.centerx - p.get_width() // 2,
-                         self._size_plus.centery - p.get_height() // 2))
+                        self._size_plus.centery - p.get_height() // 2))
         x += SBW + _PAD
 
         # ── Brush preview circle ──────────────────────────────────────────
@@ -297,44 +322,37 @@ class Toolbar:
         by2        = (H - MBH) // 2
         right_edge = sw - _PAD
 
-        # stacked toolbar ± (far-right corner)
-        self._tb_plus  = pygame.Rect(right_edge - TBSZ,
-                                     cy - TBSZ - 2, TBSZ, TBSZ)
-        self._tb_minus = pygame.Rect(right_edge - TBSZ,
-                                     cy + 2,         TBSZ, TBSZ)
-        for r, sym in ((self._tb_plus, "+"), (self._tb_minus, "−")):
+        self._tb_plus  = pygame.Rect(right_edge - TBSZ, cy - TBSZ - 2, TBSZ, TBSZ)
+        self._tb_minus = pygame.Rect(right_edge - TBSZ, cy + 2,         TBSZ, TBSZ)
+        for r, sym in ((self._tb_plus, t["tbp"]), (self._tb_minus, t["tbm"])):
             c = _CBTNH if r.collidepoint(mouse) else (50, 50, 62)
             pygame.draw.rect(screen, c, r, border_radius=3)
-            lbl = font.render(sym, True, (148, 148, 165))
-            screen.blit(lbl, (r.centerx - lbl.get_width() // 2,
-                               r.centery - lbl.get_height() // 2))
+            screen.blit(sym, (r.centerx - sym.get_width() // 2,
+                              r.centery - sym.get_height() // 2))
 
         rx = right_edge - TBSZ - _PAD
 
-        # build right-to-left, then draw
         self._save     = pygame.Rect(rx - _MBW, by2, _MBW, MBH); rx -= _MBW + _PAD
         self._clear    = pygame.Rect(rx - _MBW, by2, _MBW, MBH); rx -= _MBW + _PAD
         self._redo_btn = pygame.Rect(rx - _MBW, by2, _MBW, MBH); rx -= _MBW + _PAD
         self._undo_btn = pygame.Rect(rx - _MBW, by2, _MBW, MBH)
 
-        for rect, label in ((self._save, "Save ⌃S"), (self._clear, "Clear C")):
+        for rect, lbl in ((self._save, t["save"]), (self._clear, t["clear"])):
             c = _CBTNH if rect.collidepoint(mouse) else _CBTN
             pygame.draw.rect(screen, c, rect, border_radius=br6)
-            lbl = font.render(label, True, _CTXT)
             screen.blit(lbl, (rect.centerx - lbl.get_width() // 2,
-                               rect.centery - lbl.get_height() // 2))
+                              rect.centery - lbl.get_height() // 2))
 
-        for rect, label, enabled in (
-            (self._undo_btn, "Undo", can_undo),
-            (self._redo_btn, "Redo", can_redo),
+        for rect, lbl_e, lbl_d, enabled in (
+            (self._undo_btn, t["undo_e"], t["undo_d"], can_undo),
+            (self._redo_btn, t["redo_e"], t["redo_d"], can_redo),
         ):
             bg = (_CBTNH if (rect.collidepoint(mouse) and enabled)
                   else _CBTN if enabled else (48, 48, 48))
             pygame.draw.rect(screen, bg, rect, border_radius=br6)
-            tc = _CTXT if enabled else _CTXTD
-            lbl = font.render(label, True, tc)
+            lbl = lbl_e if enabled else lbl_d
             screen.blit(lbl, (rect.centerx - lbl.get_width() // 2,
-                               rect.centery - lbl.get_height() // 2))
+                              rect.centery - lbl.get_height() // 2))
 
 
 class Canvas:
@@ -484,9 +502,25 @@ def main():
     dlg_yes       = pygame.Rect(0, 0, 0, 0)
     dlg_no        = pygame.Rect(0, 0, 0, 0)
     last_tool     = None
+    dirty         = True
+    last_mouse    = (-1, -1)
 
     running = True
     while running:
+        sw, sh = screen.get_size()
+        mouse  = pygame.mouse.get_pos()
+
+        # Hover effects only exist in the toolbar and confirm dialog — moving
+        # the mouse elsewhere (canvas while not drawing) needs no redraw.
+        if mouse != last_mouse:
+            in_canvas_idle = (
+                toolbar.height <= mouse[1] <= sh - status_bar.height
+                and not drawing and not confirm_clear
+            )
+            if not in_canvas_idle:
+                dirty = True
+            last_mouse = mouse
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -503,9 +537,11 @@ def main():
                     if dlg_yes.collidepoint(event.pos):
                         canvas.clear()
                     confirm_clear = False
+                dirty = True
                 continue
 
             if event.type == pygame.KEYDOWN:
+                dirty = True
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_c:
@@ -524,26 +560,38 @@ def main():
             action = toolbar.handle_event(event)
             if action == "clear":
                 confirm_clear = True
+                dirty = True
             elif action == "save":
                 save_msg     = f"Saved → {canvas.save()}"
                 save_msg_ttl = FPS * 4
+                dirty = True
             elif action == "undo":
                 canvas.undo()
+                dirty = True
             elif action == "redo":
                 canvas.redo()
+                dirty = True
+            elif action is None and event.type in (
+                pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN, pygame.MOUSEWHEEL,
+            ):
+                dirty = True  # toolbar state may have changed (color, tool, brush)
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if canvas.rect.collidepoint(event.pos):
                     if toolbar.tool == TOOL_BUCKET:
                         canvas.flood_fill(event.pos, toolbar.color)
+                        dirty = True
                     else:
                         drawing = True
                         canvas.start(event.pos, toolbar.color, toolbar.brush)
+                        dirty = True
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 drawing = False
                 canvas.stop()
+                dirty = True
             elif event.type == pygame.MOUSEMOTION and drawing:
                 canvas.stroke(event.pos, toolbar.color, toolbar.brush)
+                dirty = True
 
             status_bar.handle_event(event)
 
@@ -557,21 +605,28 @@ def main():
         cr = _canvas_rect(screen, toolbar.height, status_bar.height)
         if cr != canvas.rect:
             canvas.resize(cr)
-
-        screen.fill(BG)
-        toolbar.draw(screen, can_undo=canvas.can_undo, can_redo=canvas.can_redo)
-        canvas.draw(screen)
-        status_bar.draw(screen)
+            dirty = True
 
         if save_msg_ttl > 0:
             save_msg_ttl -= 1
-            lbl = msg_font.render(save_msg, True, (100, 230, 120))
-            screen.blit(lbl, (8, toolbar.height + 6))
+            dirty = True
 
-        if confirm_clear:
-            _draw_confirm_dialog(screen, dlg_font, dlg_yes, dlg_no)
+        if dirty:
+            screen.fill(BG)
+            toolbar.draw(screen, can_undo=canvas.can_undo, can_redo=canvas.can_redo)
+            canvas.draw(screen)
+            status_bar.draw(screen)
 
-        pygame.display.flip()
+            if save_msg_ttl > 0:
+                lbl = msg_font.render(save_msg, True, (100, 230, 120))
+                screen.blit(lbl, (8, toolbar.height + 6))
+
+            if confirm_clear:
+                _draw_confirm_dialog(screen, dlg_font, dlg_yes, dlg_no)
+
+            pygame.display.flip()
+            dirty = False
+
         clock.tick(FPS)
 
     pygame.quit()
