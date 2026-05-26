@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from shared.status_bar import StatusBar
-from shared.util import resource_path
+from shared.util import maximize_window, resource_path
 
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -130,7 +130,8 @@ def main():
     icon = pygame.image.load(resource_path("assets/icons/memory.png", GAME_DIR))
     pygame.display.set_icon(icon)
 
-    screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE | pygame.MAXIMIZED)
+    screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+    maximize_window()
     pygame.display.set_caption(TITLE)
     clock      = pygame.time.Clock()
     status_bar = StatusBar()
