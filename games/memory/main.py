@@ -2,6 +2,7 @@ import math
 import os
 import secrets
 import sys
+import time
 
 import pygame
 
@@ -177,7 +178,7 @@ def main():
                 pending.append([flipped[0], flipped[1], MATCH_ANIM_TTL])
                 flipped.clear()
                 if matches == TOTAL_PAIRS:
-                    mqtt_publish("memory", {"moves": moves, "result": "win"})
+                    mqtt_publish("memory", {"moves": moves, "result": "win", "ts": int(time.time())})
             else:
                 wait_ttl = FLIP_BACK_TTL
 
