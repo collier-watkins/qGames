@@ -2,14 +2,16 @@ import math
 import os
 import random
 import sys
+import time
 
 import pygame
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from shared.mqtt_stats import publish as mqtt_publish
 from shared.status_bar import StatusBar
-from shared.util import maximize_window, resource_path
+from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -519,6 +521,7 @@ def _draw_font_btns(screen: pygame.Surface,
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    single_instance("battleship")
     pygame.init()
 
     icon = pygame.image.load(resource_path("assets/icons/battleship.png", GAME_DIR))
@@ -527,6 +530,7 @@ def main():
     screen     = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
     maximize_window()
     pygame.display.set_caption(TITLE)
+    draw_splash(screen, TITLE)
     clock      = pygame.time.Clock()
     status_bar = StatusBar()
 
@@ -676,6 +680,9 @@ def main():
                                     log.append(
                                         ("ALL ENEMY SHIPS DESTROYED — YOU WIN!  Press R to play again.",
                                          C_LOG_GOOD))
+                                    mqtt_publish("battleship/result", "win")
+                                    mqtt_publish("battleship/shots", len(ai_board.shots))
+                                    mqtt_publish("battleship/ts", int(time.time()))
                                 else:
                                     state    = STATE_AI
                                     ai_timer = AI_DELAY
@@ -704,6 +711,9 @@ def main():
                     winner = "ai"
                     log.append(
                         ("ALL YOUR SHIPS SUNK — GAME OVER.  Press R to play again.", C_LOG_BAD))
+                    mqtt_publish("battleship/result", "loss")
+                    mqtt_publish("battleship/shots", len(ai_board.shots))
+                    mqtt_publish("battleship/ts", int(time.time()))
                 else:
                     state = STATE_PLAYER
 

@@ -11,7 +11,7 @@ sys.path.insert(0, ROOT)
 
 from shared.mqtt_stats import publish as mqtt_publish
 from shared.status_bar import StatusBar
-from shared.util import maximize_window, resource_path
+from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -122,6 +122,7 @@ def _draw_match_anim(screen: pygame.Surface, card: Card, ttl: int):
 
 
 def main():
+    single_instance("memory")
     pygame.init()
 
     icon = pygame.image.load(resource_path("assets/icons/memory.png", GAME_DIR))
@@ -130,6 +131,7 @@ def main():
     screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
     maximize_window()
     pygame.display.set_caption(TITLE)
+    draw_splash(screen, TITLE)
     clock      = pygame.time.Clock()
     status_bar = StatusBar()
     hud_font   = pygame.font.SysFont("sans", 20, bold=True)

@@ -2,6 +2,7 @@ import datetime
 import math
 import os
 import sys
+import time
 from collections import deque
 
 import pygame
@@ -9,8 +10,9 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from shared.mqtt_stats import publish as mqtt_publish
 from shared.status_bar import StatusBar
-from shared.util import maximize_window, resource_path
+from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -480,6 +482,7 @@ def _draw_confirm_dialog(screen, dlg_font, yes_rect: pygame.Rect, no_rect: pygam
 
 
 def main():
+    single_instance("paint")
     pygame.init()
 
     icon = pygame.image.load(resource_path("assets/icons/paint.png", GAME_DIR))
@@ -488,6 +491,7 @@ def main():
     screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
     maximize_window()
     pygame.display.set_caption(TITLE)
+    draw_splash(screen, TITLE)
     clock      = pygame.time.Clock()
     status_bar = StatusBar()
     toolbar    = Toolbar()
@@ -554,16 +558,22 @@ def main():
                 elif event.key == pygame.K_y and (event.mod & pygame.KMOD_CTRL):
                     canvas.redo()
                 elif event.key == pygame.K_s and (event.mod & pygame.KMOD_CTRL):
-                    save_msg     = f"Saved → {canvas.save()}"
+                    _path        = canvas.save()
+                    save_msg     = f"Saved → {_path}"
                     save_msg_ttl = FPS * 4
+                    mqtt_publish("paint/saved", os.path.basename(_path))
+                    mqtt_publish("paint/ts", int(time.time()))
 
             action = toolbar.handle_event(event)
             if action == "clear":
                 confirm_clear = True
                 dirty = True
             elif action == "save":
-                save_msg     = f"Saved → {canvas.save()}"
+                _path        = canvas.save()
+                save_msg     = f"Saved → {_path}"
                 save_msg_ttl = FPS * 4
+                mqtt_publish("paint/saved", os.path.basename(_path))
+                mqtt_publish("paint/ts", int(time.time()))
                 dirty = True
             elif action == "undo":
                 canvas.undo()
