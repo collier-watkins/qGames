@@ -11,6 +11,7 @@ Small educational games for kids, built with Python + Pygame, designed to run na
 | `paint` | ✓ done | MS Paint-style canvas with colour palette, undo/redo, and PNG export |
 | `memory` | ✓ done | 4×4 card pair-matching game |
 | `battleship` | ✓ done | Single-player naval strategy vs AI |
+| `sequence` | ✓ done | Spot the repeating pattern and choose what comes next |
 | `letters` | stub | Keyboard keys speak letter names |
 
 > **Rule for new games:** every game must publish MQTT stats. See [MQTT](#mqtt) below.
@@ -93,6 +94,10 @@ If `MQTT_BROKER` is blank the games skip publishing silently — no errors.
 | `qGames/battleship/result` | `win` or `loss` | Game over |
 | `qGames/battleship/shots` | integer | Game over |
 | `qGames/battleship/ts` | Unix timestamp | Game over |
+| `qGames/sequence/result` | `correct` or `wrong` | Each answer |
+| `qGames/sequence/score` | integer | Each answer |
+| `qGames/sequence/total` | integer | Each answer |
+| `qGames/sequence/ts` | Unix timestamp | Each answer |
 
 ### Home Assistant sensors
 

@@ -101,4 +101,35 @@ for hx, hy in [(C - 44, C - 44), (C + 28, C + 30)]:
 pygame.draw.circle(s, (110, 155, 215), (C - 14, C + 44), 8, 3)
 save(s, "games", "battleship", "assets", "icons", "battleship.png")
 
+# ── sequence ──────────────────────────────────────────────────────────────────
+s = new_surf()
+pygame.draw.circle(s, (18, 28, 52), (C, C), C - 4)
+# 2×2 grid of cells: top-left=blue circle, top-right=red square,
+# bottom-left=blue circle, bottom-right=? (question mark)
+CELL, GAP = 80, 14
+ox = C - CELL - GAP // 2
+oy = C - CELL - GAP // 2
+positions = [(ox, oy), (ox + CELL + GAP, oy),
+             (ox, oy + CELL + GAP), (ox + CELL + GAP, oy + CELL + GAP)]
+for rx, ry in positions:
+    pygame.draw.rect(s, (42, 55, 92), (rx, ry, CELL, CELL), border_radius=10)
+# Blue circle (top-left)
+cx1, cy1 = positions[0][0] + CELL // 2, positions[0][1] + CELL // 2
+pygame.draw.circle(s, (60, 130, 220), (cx1, cy1), 28)
+# Red square (top-right)
+cx2, cy2 = positions[1][0] + CELL // 2, positions[1][1] + CELL // 2
+pygame.draw.rect(s, (220, 60, 60), (cx2 - 22, cy2 - 22, 44, 44), border_radius=6)
+# Blue circle (bottom-left)
+cx3, cy3 = positions[2][0] + CELL // 2, positions[2][1] + CELL // 2
+pygame.draw.circle(s, (60, 130, 220), (cx3, cy3), 28)
+# "?" cell (bottom-right) with yellow-green border
+rx4, ry4 = positions[3]
+pygame.draw.rect(s, (55, 72, 115), (rx4, ry4, CELL, CELL), border_radius=10)
+pygame.draw.rect(s, (200, 220, 70), (rx4, ry4, CELL, CELL), border_radius=10, width=4)
+cx4, cy4 = rx4 + CELL // 2, ry4 + CELL // 2
+fq = pygame.font.SysFont("sans", 52, bold=True)
+ql = fq.render("?", True, (200, 220, 70))
+s.blit(ql, (cx4 - ql.get_width() // 2, cy4 - ql.get_height() // 2))
+save(s, "games", "sequence", "assets", "icons", "sequence.png")
+
 print("Done.")

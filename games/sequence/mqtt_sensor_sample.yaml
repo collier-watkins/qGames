@@ -1,0 +1,29 @@
+# Home Assistant MQTT sensors for qGames - Sequence
+# Copy the relevant blocks into your configuration.yaml under the mqtt: key.
+# Trigger automations off sensor.sequence_last_answered — it always changes,
+# even when result and score repeat across questions.
+
+mqtt:
+  sensor:
+    - name: "Sequence Last Answered"
+      unique_id: "qgames_sequence_ts"
+      state_topic: "qGames/sequence/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "Sequence Result"
+      unique_id: "qgames_sequence_result"
+      state_topic: "qGames/sequence/result"
+      icon: "mdi:check-circle"
+
+    - name: "Sequence Score"
+      unique_id: "qgames_sequence_score"
+      state_topic: "qGames/sequence/score"
+      unit_of_measurement: "correct"
+      icon: "mdi:star"
+
+    - name: "Sequence Total Answered"
+      unique_id: "qgames_sequence_total"
+      state_topic: "qGames/sequence/total"
+      unit_of_measurement: "questions"
+      icon: "mdi:counter"

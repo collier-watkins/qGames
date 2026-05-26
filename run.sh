@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 
 PYGAME_APT="python3-pygame=2.5.2-2"
 PAHO_APT="python3-paho-mqtt"
-ALL_GAMES=(paint memory letters battleship)
+ALL_GAMES=(paint memory letters battleship sequence)
 
 if [[ $# -eq 0 ]]; then
     echo "Usage: ./run.sh <game> [args...]"

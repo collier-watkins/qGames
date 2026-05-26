@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-ALL_GAMES=(paint memory letters battleship)
+ALL_GAMES=(paint memory letters battleship sequence)
 GAMES=("${ALL_GAMES[@]}")
 if [[ $# -gt 0 ]]; then
     GAMES=("$@")
@@ -27,12 +27,14 @@ declare -A GAME_NAMES=(
     [memory]="Memory Match"
     [letters]="Letter Sounds"
     [battleship]="Battleship"
+    [sequence]="Sequence"
 )
 declare -A GAME_COMMENTS=(
     [paint]="Draw and paint freely"
     [memory]="Flip cards and find matching pairs"
     [letters]="Learn letter sounds"
     [battleship]="Single-player naval strategy game"
+    [sequence]="Spot the pattern and choose what comes next"
 )
 
 # ── Taskbar integration (Raspberry Pi OS) ─────────────────────────────────────
