@@ -130,7 +130,7 @@ def main():
     icon = pygame.image.load(resource_path("assets/icons/memory.png", GAME_DIR))
     pygame.display.set_icon(icon)
 
-    screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+    screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE | pygame.MAXIMIZED)
     pygame.display.set_caption(TITLE)
     clock      = pygame.time.Clock()
     status_bar = StatusBar()
