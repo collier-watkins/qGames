@@ -7,7 +7,7 @@
 #         ./install.sh paint        — install just paint
 #
 # Taskbar support:
-#   Raspberry Pi OS Bookworm  →  wf-panel-pi  (~/.config/wf-panel-pi.ini)
+#   Raspberry Pi OS Bookworm  →  wf-panel-pi  (~/.config/wf-panel-pi/wf-panel-pi.ini)
 #   Raspberry Pi OS Bullseye  →  LXPanel      (~/.config/lxpanel/.../panel)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -46,46 +46,61 @@ _pi_panel_add() {
     local DESK="$DESK_DIR/$GAME.desktop"
 
     # ── wf-panel-pi  (Raspberry Pi OS Bookworm / Wayland) ────────────────────
-    # The panel stores a semicolon-separated list of app-IDs in [launchers].
-    local WF="$HOME/.config/wf-panel-pi.ini"
+    # Config: ~/.config/wf-panel-pi/wf-panel-pi.ini
+    # Format: launcher_000001=game.desktop  under [panel]
+    # The panel watches the file via inotify — changes appear immediately.
+    local WF="$HOME/.config/wf-panel-pi/wf-panel-pi.ini"
     if command -v wf-panel-pi &>/dev/null || [[ -f "$WF" ]]; then
-        # Ensure a user config exists to modify.
+        # Ensure the config file and its directory exist.
         if [[ ! -f "$WF" ]]; then
-            # Try copying the system default first.
+            mkdir -p "$(dirname "$WF")"
+            # Try seeding from the system default first.
             local _seed
-            for _seed in /etc/xdg/wf-panel-pi.ini /usr/share/wf-panel-pi/wf-panel-pi.ini; do
+            for _seed in \
+                    /etc/xdg/wf-panel-pi/wf-panel-pi.ini \
+                    /etc/xdg/wf-panel-pi.ini; do
                 if [[ -f "$_seed" ]]; then cp "$_seed" "$WF"; break; fi
             done
-            # No system config found — create a minimal stub.
-            # wf-panel-pi merges user config with built-in defaults,
-            # so we only need to declare the launchers section.
-            if [[ ! -f "$WF" ]]; then
-                printf '[launchers]\nlaunchers = \n' > "$WF"
-            fi
+            # No system config — create a minimal stub.
+            # wf-panel-pi merges this with its compiled-in defaults.
+            [[ ! -f "$WF" ]] && printf '[panel]\n' > "$WF"
         fi
-        if ! grep -qw "$GAME" "$WF" 2>/dev/null; then
+        if ! grep -qF "${GAME}.desktop" "$WF" 2>/dev/null; then
             python3 - "$WF" "$GAME" <<'PYEOF'
 import sys, re
 path, game = sys.argv[1], sys.argv[2]
+desktop = game + '.desktop'
+
 with open(path) as f:
     conf = f.read()
 
-def add_to_line(m):
-    vals = [v.strip() for v in m.group(1).split(';') if v.strip()]
-    if game not in vals:
-        vals.append(game)
-    return 'launchers = ' + ';'.join(vals) + ';'
+if desktop in conf:
+    sys.exit(0)
 
-if re.search(r'(?m)^launchers\s*=', conf):
-    # Append to existing launchers= line
-    conf = re.sub(r'(?m)^launchers\s*=\s*(.*)', add_to_line, conf)
-elif '[launchers]' in conf:
-    # Section present but no launchers key yet
-    conf = conf.replace('[launchers]',
-                        '[launchers]\nlaunchers = ' + game + ';', 1)
+# Find the highest existing launcher_XXXXXX number in [panel].
+nums = [int(m.group(1)) for m in re.finditer(r'(?m)^launcher_(\d{6})\s*=', conf)]
+next_num = max(nums, default=0) + 1
+new_line = 'launcher_{:06d}={}\n'.format(next_num, desktop)
+
+panel_m = re.search(r'(?m)^\[panel\]', conf)
+if panel_m:
+    # Find where the [panel] section ends (next section header or EOF).
+    section_start = panel_m.end()
+    next_sec = re.search(r'(?m)^\[', conf[section_start:])
+    section_end = section_start + next_sec.start() if next_sec else len(conf)
+    panel_body = conf[section_start:section_end]
+
+    # Insert after the last launcher_ line, or right after [panel]\n.
+    last = None
+    for m in re.finditer(r'(?m)^launcher_\d{6}=.*\n?', panel_body):
+        last = m
+    if last:
+        insert_at = section_start + last.end()
+    else:
+        insert_at = panel_m.end() + (1 if conf[panel_m.end():panel_m.end()+1] == '\n' else 0)
+    conf = conf[:insert_at] + new_line + conf[insert_at:]
 else:
-    # No section at all — add one
-    conf = conf.rstrip() + '\n\n[launchers]\nlaunchers = ' + game + ';\n'
+    conf = conf.rstrip() + '\n\n[panel]\n' + new_line
 
 with open(path, 'w') as f:
     f.write(conf)
@@ -151,10 +166,9 @@ PYEOF
 
 _pi_panel_reload() {
     [[ $_PANEL_CHANGED -eq 0 ]] && return
-    # Reload the panel so the new button appears without a logout.
     if command -v wf-panel-pi &>/dev/null; then
-        # wf-panel-pi ignores SIGHUP. Kill it; lwrespawn (its watchdog) restarts
-        # it automatically with the new config. Only do this on a live display.
+        # wf-panel-pi watches its config via inotify and reloads automatically.
+        # As a fallback, kill it so lwrespawn restarts it with the new config.
         if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
             pkill wf-panel-pi 2>/dev/null || true
             echo "  panel    → wf-panel-pi reloaded"
