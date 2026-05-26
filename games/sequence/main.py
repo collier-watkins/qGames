@@ -18,7 +18,8 @@ GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
 TITLE        = "Sequence"
 FPS          = 30
-FEEDBACK_TTL = 45   # ~1.5 s at 30 FPS
+ROUND_SIZE   = 10
+FEEDBACK_TTL = 42   # ~1.4 s at 30 FPS
 
 # ── Colours ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,8 @@ C_BTN_BDR     = (65,  88, 138)
 C_CORRECT     = (55, 195,  80)
 C_WRONG       = (205,  55,  45)
 C_CORRECT_DIM = (30, 110,  50)
+C_STAR        = (240, 195,  45)
+C_STAR_EMPTY  = (55,  68, 105)
 
 ELEM_COLORS = {
     "red":    (220,  60,  60),
@@ -148,14 +151,12 @@ def _draw_shape(surf: pygame.Surface, shape: str, color: tuple,
 
 def _draw_cell(surf: pygame.Surface, elem: tuple, cx: int, cy: int, cell: int,
                border_color=None, border_w: int = 0):
-    shape, cname = elem
     r  = pygame.Rect(cx - cell // 2, cy - cell // 2, cell, cell)
     br = max(4, cell // 8)
     pygame.draw.rect(surf, C_CELL_BG, r, border_radius=br)
     bw = border_w or max(2, cell // 24)
-    pygame.draw.rect(surf, border_color or C_CELL_BDR, r,
-                     border_radius=br, width=bw)
-    _draw_shape(surf, shape, ELEM_COLORS[cname], cx, cy, cell * 2 // 3)
+    pygame.draw.rect(surf, border_color or C_CELL_BDR, r, border_radius=br, width=bw)
+    _draw_shape(surf, elem[0], ELEM_COLORS[elem[1]], cx, cy, cell * 2 // 3)
 
 
 def _draw_q_cell(surf: pygame.Surface, cx: int, cy: int, cell: int,
@@ -163,8 +164,7 @@ def _draw_q_cell(surf: pygame.Surface, cx: int, cy: int, cell: int,
     r  = pygame.Rect(cx - cell // 2, cy - cell // 2, cell, cell)
     br = max(4, cell // 8)
     pygame.draw.rect(surf, C_CELL_BG, r, border_radius=br)
-    pygame.draw.rect(surf, C_Q_BDR, r, border_radius=br,
-                     width=max(3, cell // 18))
+    pygame.draw.rect(surf, C_Q_BDR, r, border_radius=br, width=max(3, cell // 18))
     lbl = q_font.render("?", True, C_Q_TXT)
     surf.blit(lbl, (cx - lbl.get_width() // 2, cy - lbl.get_height() // 2))
 
@@ -185,7 +185,6 @@ def _new_question() -> tuple:
     visible  = sequence[:n_shown]
     answer   = sequence[n_shown]
 
-    # Prefer elements from the current pattern as wrong-answer distractors
     from_pat  = [e for e in pattern if e != answer]
     from_pool = [e for e in _ALL_ELEMENTS if e != answer and e not in from_pat]
     random.shuffle(from_pat)
@@ -195,6 +194,21 @@ def _new_question() -> tuple:
     options = [answer] + distractors
     random.shuffle(options)
     return visible, answer, options, pattern
+
+
+def _star_count(correct: int) -> int:
+    if correct >= 8: return 3
+    if correct >= 5: return 2
+    if correct >= 2: return 1
+    return 0
+
+
+def _round_message(correct: int) -> str:
+    if correct == ROUND_SIZE: return "Perfect score!"
+    if correct >= 8:          return "Amazing!"
+    if correct >= 5:          return "Good job!"
+    if correct >= 2:          return "Keep trying!"
+    return "Don't give up!"
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -216,18 +230,21 @@ def main():
     hud_font   = pygame.font.SysFont("sans", 20, bold=True)
     prompt_font= pygame.font.SysFont("sans", 18, bold=True)
 
-    correct_total  = 0
-    answered_total = 0
+    # Round state
+    q_num            = 0          # questions answered this round (0–ROUND_SIZE)
+    question_results = []         # True/False per question
+    correct_total    = 0
 
     visible, answer, options, pattern = _new_question()
 
-    state        = "asking"   # "asking" | "feedback"
+    state        = "asking"       # "asking" | "feedback" | "roundover"
     feedback_ttl = 0
     selected_idx = -1
     is_correct   = False
 
-    # Layout vars (kept outside loop so click detection uses current frame's values)
-    btn_rects   = [pygame.Rect(0, 0, 1, 1)] * 4
+    # Layout cache — recompute font only when cell size changes
+    btn_rects    = [pygame.Rect(0, 0, 1, 1)] * 4
+    replay_rect  = pygame.Rect(0, 0, 0, 0)
     last_cell_sz = -1
     q_font       = pygame.font.SysFont("sans", 24, bold=True)
 
@@ -240,72 +257,107 @@ def main():
         status_h = status_bar.height
         mouse    = pygame.mouse.get_pos()
 
-        # ── Layout (computed every frame — needed for click detection) ─────────
-        HUD_H   = 50
-        avail_h = sh - HUD_H - status_h
-        seq_h   = int(avail_h * 0.44)
-        prompt_h = 28
-        btn_area_h = avail_h - seq_h - prompt_h - 20
+        # ── Layout ────────────────────────────────────────────────────────────
+        HUD_H    = 44
+        PROG_H   = 20        # progress-bar strip height
+        VGAP     = 12        # vertical gap between content zones
+        PROMPT_H = 26
+        avail_w  = sw - 80   # 40 px padding each side
+        avail_h  = sh - HUD_H - PROG_H - status_h - 8
 
-        n_cells  = len(visible) + 1       # visible elements + "?" cell
-        avail_w  = sw - 80
-        cell_gap = max(6, min(16, avail_w // (n_cells * 8)))
-        cell_w   = (avail_w - cell_gap * (n_cells - 1)) // n_cells
-        cell_sz  = max(30, min(cell_w, seq_h - 24, 120))
+        n_cells  = len(visible) + 1
+        cell_gap = max(5, min(14, avail_w // max(1, n_cells * 9)))
 
+        # Width-constrained sizes (uncapped)
+        cell_from_w = max(28, (avail_w - cell_gap * (n_cells - 1)) // n_cells)
+        btn_from_w  = max(40, (avail_w - 5 * 8) // 4)
+
+        cell_sz = min(cell_from_w, 110)
+        btn_sz  = min(btn_from_w,  150)
+
+        # Scale down proportionally if content exceeds available height
+        content_h = cell_sz + VGAP + PROMPT_H + VGAP + btn_sz
+        if content_h > avail_h - 8:
+            scale   = (avail_h - 8) / content_h
+            cell_sz = max(28, int(cell_sz * scale))
+            btn_sz  = max(40, int(btn_sz  * scale))
+            content_h = cell_sz + VGAP + PROMPT_H + VGAP + btn_sz
+
+        # Vertical centre of content block
+        content_top = HUD_H + PROG_H + max(0, (avail_h - content_h) // 2)
+        seq_cy      = content_top + cell_sz // 2
+        prompt_y    = content_top + cell_sz + VGAP
+        btn_y       = prompt_y + PROMPT_H + VGAP
+
+        # Lazy q-font rebuild
         if cell_sz != last_cell_sz:
-            q_font_sz   = max(14, min(36, cell_sz // 2))
-            q_font      = pygame.font.SysFont("sans", q_font_sz, bold=True)
+            q_font       = pygame.font.SysFont("sans",
+                                               max(12, min(34, cell_sz // 2)), bold=True)
             last_cell_sz = cell_sz
-            dirty = True
+            dirty        = True
 
+        # Sequence horizontal layout
         total_seq_w = n_cells * cell_sz + (n_cells - 1) * cell_gap
         seq_ox      = (sw - total_seq_w) // 2 + cell_sz // 2
-        seq_oy      = HUD_H + (seq_h - cell_sz) // 2 + cell_sz // 2
 
-        btn_sz   = max(50, min((avail_w - 48) // 4, btn_area_h - 16, 160))
-        btn_gap  = (avail_w - 4 * btn_sz) // 5
-        btn_y    = HUD_H + seq_h + prompt_h + 10 + (btn_area_h - btn_sz) // 2
-
+        # Button horizontal layout
+        btn_gap   = max(8, min(32, (avail_w - 4 * btn_sz) // 5))
         btn_rects = [
             pygame.Rect(40 + btn_gap + i * (btn_sz + btn_gap), btn_y, btn_sz, btn_sz)
             for i in range(4)
         ]
 
+        # Progress-bar segment geometry
+        seg_sz  = max(10, min(22, (sw - 120 - 9 * 4) // ROUND_SIZE))
+        seg_gap = max(3, min(6, (sw - 120 - ROUND_SIZE * seg_sz) // (ROUND_SIZE - 1)))
+        seg_total_w = ROUND_SIZE * seg_sz + (ROUND_SIZE - 1) * seg_gap
+        seg_x0  = (sw - seg_total_w) // 2
+        seg_y   = HUD_H + (PROG_H - seg_sz) // 2
+
+        # Round-over replay button geometry (used for click detection)
+        ro_btn_w, ro_btn_h = min(220, sw // 4), 52
+        replay_rect = pygame.Rect(sw // 2 - ro_btn_w // 2,
+                                  sh // 2 + sh // 8, ro_btn_w, ro_btn_h)
+
         # ── Events ────────────────────────────────────────────────────────────
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_r:
-                    correct_total  = 0
-                    answered_total = 0
+                    q_num = 0; question_results = []; correct_total = 0
                     visible, answer, options, pattern = _new_question()
-                    state        = "asking"
-                    feedback_ttl = 0
-                    selected_idx = -1
-                    last_cell_sz = -1   # force font refresh for new question length
-                    dirty        = True
-            elif (event.type == pygame.MOUSEBUTTONDOWN
-                  and event.button == 1
-                  and state == "asking"):
-                for i, rect in enumerate(btn_rects):
-                    if rect.collidepoint(event.pos):
-                        selected_idx    = i
-                        is_correct      = (options[i] == answer)
-                        answered_total += 1
-                        if is_correct:
-                            correct_total += 1
-                        state        = "feedback"
-                        feedback_ttl = FEEDBACK_TTL
-                        mqtt_publish("sequence/result", "correct" if is_correct else "wrong")
-                        mqtt_publish("sequence/score",  correct_total)
-                        mqtt_publish("sequence/total",  answered_total)
-                        mqtt_publish("sequence/ts",     int(time.time()))
-                        dirty = True
-                        break
+                    state = "asking"; feedback_ttl = 0; selected_idx = -1
+                    last_cell_sz = -1; dirty = True
+
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if state == "asking":
+                    for i, rect in enumerate(btn_rects):
+                        if rect.collidepoint(event.pos):
+                            selected_idx  = i
+                            is_correct    = (options[i] == answer)
+                            correct_total += int(is_correct)
+                            question_results.append(is_correct)
+                            q_num        += 1
+                            state         = "feedback"
+                            feedback_ttl  = FEEDBACK_TTL
+                            mqtt_publish("sequence/result", "correct" if is_correct else "wrong")
+                            mqtt_publish("sequence/score",  correct_total)
+                            mqtt_publish("sequence/total",  q_num)
+                            mqtt_publish("sequence/ts",     int(time.time()))
+                            dirty = True
+                            break
+
+                elif state == "roundover":
+                    if replay_rect.collidepoint(event.pos):
+                        q_num = 0; question_results = []; correct_total = 0
+                        visible, answer, options, pattern = _new_question()
+                        state = "asking"; feedback_ttl = 0; selected_idx = -1
+                        last_cell_sz = -1; dirty = True
+
             status_bar.handle_event(event)
 
         # ── Feedback countdown ─────────────────────────────────────────────────
@@ -313,10 +365,15 @@ def main():
             feedback_ttl -= 1
             dirty = True
             if feedback_ttl == 0:
-                visible, answer, options, pattern = _new_question()
-                state        = "asking"
-                selected_idx = -1
-                last_cell_sz = -1   # question length may change → recompute font
+                if q_num >= ROUND_SIZE:
+                    state = "roundover"
+                    mqtt_publish("sequence/round_score", correct_total)
+                    mqtt_publish("sequence/ts",          int(time.time()))
+                else:
+                    visible, answer, options, pattern = _new_question()
+                    state        = "asking"
+                    selected_idx = -1
+                    last_cell_sz = -1
 
         # ── Hover → dirty ─────────────────────────────────────────────────────
         if mouse != last_mouse:
@@ -331,61 +388,132 @@ def main():
         screen.fill(C_BG)
 
         # HUD
-        hud_str = (f"{TITLE}   ·   score: {correct_total} / {answered_total}"
-                   f"   ·   R to restart")
+        if state == "roundover":
+            hud_str = f"{TITLE}   ·   R to play again"
+        else:
+            hud_str = f"{TITLE}   ·   {q_num} / {ROUND_SIZE}   ·   R to restart"
         hud_s = hud_font.render(hud_str, True, C_HUD)
         screen.blit(hud_s, (sw // 2 - hud_s.get_width() // 2,
                              HUD_H // 2 - hud_s.get_height() // 2))
 
-        # Sequence elements
-        for i, elem in enumerate(visible):
-            cx = seq_ox + i * (cell_sz + cell_gap)
-            _draw_cell(screen, elem, cx, seq_oy, cell_sz)
-            # Arrow between cells
-            if i < len(visible) and cell_gap >= 8:
-                ax = cx + cell_sz // 2 + cell_gap // 2
-                ah = max(4, cell_gap // 3)
-                aw = max(4, cell_gap // 2)
-                pygame.draw.polygon(screen, C_CELL_BDR, [
-                    (ax - aw // 2, seq_oy - ah // 2),
-                    (ax + aw // 2, seq_oy),
-                    (ax - aw // 2, seq_oy + ah // 2),
-                ])
+        # Progress bar
+        for i in range(ROUND_SIZE):
+            rx = seg_x0 + i * (seg_sz + seg_gap)
+            br = max(2, seg_sz // 5)
+            if i < len(question_results):
+                color = C_CORRECT if question_results[i] else C_WRONG
+                pygame.draw.rect(screen, color, (rx, seg_y, seg_sz, seg_sz),
+                                 border_radius=br)
+            elif i == len(question_results) and state != "roundover":
+                # current question marker
+                pygame.draw.rect(screen, C_CELL_BG, (rx, seg_y, seg_sz, seg_sz),
+                                 border_radius=br)
+                pygame.draw.rect(screen, C_Q_BDR, (rx, seg_y, seg_sz, seg_sz),
+                                 border_radius=br, width=max(1, seg_sz // 8))
+            else:
+                pygame.draw.rect(screen, C_CELL_BG, (rx, seg_y, seg_sz, seg_sz),
+                                 border_radius=br)
+                pygame.draw.rect(screen, C_CELL_BDR, (rx, seg_y, seg_sz, seg_sz),
+                                 border_radius=br, width=1)
 
-        # "?" cell
-        qx = seq_ox + len(visible) * (cell_sz + cell_gap)
-        _draw_q_cell(screen, qx, seq_oy, cell_sz, q_font)
+        # ── Round-over screen ─────────────────────────────────────────────────
+        if state == "roundover":
+            stars    = _star_count(correct_total)
+            msg      = _round_message(correct_total)
+            mid_y    = HUD_H + PROG_H + (sh - HUD_H - PROG_H - status_h) // 2
 
-        # Prompt
-        prompt_y = HUD_H + seq_h + 4
-        pr = prompt_font.render("What comes next?", True, C_PROMPT)
-        screen.blit(pr, (sw // 2 - pr.get_width() // 2, prompt_y))
+            tf_sz = max(28, min(52, sh // 14))
+            sf_sz = max(20, min(40, sh // 18))
+            bf_sz = max(14, min(22, sh // 32))
+            tf    = pygame.font.SysFont("sans", tf_sz, bold=True)
+            sf    = pygame.font.SysFont("sans", sf_sz, bold=True)
+            bf    = pygame.font.SysFont("sans", bf_sz, bold=True)
 
-        # Answer buttons
-        for i, rect in enumerate(btn_rects):
-            elem = options[i]
-            br   = max(4, btn_sz // 8)
+            # Title
+            title_s = tf.render("Round Complete!", True, C_HUD)
+            screen.blit(title_s, (sw // 2 - title_s.get_width() // 2,
+                                   mid_y - tf_sz * 4))
 
-            if state == "feedback":
-                if i == selected_idx:
-                    border = C_CORRECT if is_correct else C_WRONG
-                    bw = max(4, btn_sz // 14)
-                elif not is_correct and options[i] == answer:
-                    border = C_CORRECT_DIM
-                    bw = max(2, btn_sz // 20)
+            # Stars (3 total, filled or empty)
+            star_sz  = max(32, min(64, sh // 11))
+            star_gap = star_sz // 4
+            n_stars  = 3
+            star_row_w = n_stars * star_sz + (n_stars - 1) * star_gap
+            star_x0    = sw // 2 - star_row_w // 2 + star_sz // 2
+            star_cy    = mid_y - tf_sz * 4 + tf_sz + star_sz // 2 + 16
+            for si in range(n_stars):
+                color = C_STAR if si < stars else C_STAR_EMPTY
+                _draw_shape(screen, "star", color,
+                            star_x0 + si * (star_sz + star_gap), star_cy, star_sz)
+
+            # Score
+            score_s = sf.render(f"{correct_total}  /  {ROUND_SIZE}", True, (220, 225, 245))
+            screen.blit(score_s, (sw // 2 - score_s.get_width() // 2,
+                                   star_cy + star_sz // 2 + 18))
+
+            # Message
+            msg_s = sf.render(msg, True, C_PROMPT)
+            screen.blit(msg_s, (sw // 2 - msg_s.get_width() // 2,
+                                 star_cy + star_sz // 2 + 18 + sf_sz + 10))
+
+            # Play Again button
+            pa_bg = C_BTN_HOVER if replay_rect.collidepoint(mouse) else C_BTN_IDLE
+            pygame.draw.rect(screen, pa_bg, replay_rect, border_radius=10)
+            pygame.draw.rect(screen, C_BTN_BDR, replay_rect, border_radius=10, width=2)
+            pa_s = bf.render("▶  Play Again", True, C_HUD)
+            screen.blit(pa_s, (replay_rect.centerx - pa_s.get_width() // 2,
+                                replay_rect.centery - pa_s.get_height() // 2))
+
+        # ── Question screen ───────────────────────────────────────────────────
+        else:
+            # Sequence cells
+            for i, elem in enumerate(visible):
+                cx = seq_ox + i * (cell_sz + cell_gap)
+                _draw_cell(screen, elem, cx, seq_cy, cell_sz)
+                # Arrow chevron between cells
+                if cell_gap >= 8:
+                    ax = cx + cell_sz // 2 + cell_gap // 2
+                    ah = max(4, cell_gap // 3)
+                    aw = max(4, cell_gap // 2)
+                    pygame.draw.polygon(screen, C_CELL_BDR, [
+                        (ax - aw // 2, seq_cy - ah // 2),
+                        (ax + aw // 2, seq_cy),
+                        (ax - aw // 2, seq_cy + ah // 2),
+                    ])
+
+            # "?" cell
+            qx = seq_ox + len(visible) * (cell_sz + cell_gap)
+            _draw_q_cell(screen, qx, seq_cy, cell_sz, q_font)
+
+            # Prompt
+            pr = prompt_font.render("What comes next?", True, C_PROMPT)
+            screen.blit(pr, (sw // 2 - pr.get_width() // 2, prompt_y))
+
+            # Answer buttons
+            for i, rect in enumerate(btn_rects):
+                elem = options[i]
+                br   = max(4, btn_sz // 8)
+
+                if state == "feedback":
+                    if i == selected_idx:
+                        border = C_CORRECT if is_correct else C_WRONG
+                        bw = max(4, btn_sz // 14)
+                    elif not is_correct and options[i] == answer:
+                        border = C_CORRECT_DIM
+                        bw = max(2, btn_sz // 20)
+                    else:
+                        border = C_BTN_BDR
+                        bw = max(2, btn_sz // 24)
+                    bg = C_BTN_IDLE
                 else:
                     border = C_BTN_BDR
-                    bw = max(2, btn_sz // 24)
-                bg = C_BTN_IDLE
-            else:
-                border = C_BTN_BDR
-                bw     = max(2, btn_sz // 24)
-                bg     = C_BTN_HOVER if rect.collidepoint(mouse) else C_BTN_IDLE
+                    bw     = max(2, btn_sz // 24)
+                    bg     = C_BTN_HOVER if rect.collidepoint(mouse) else C_BTN_IDLE
 
-            pygame.draw.rect(screen, bg, rect, border_radius=br)
-            pygame.draw.rect(screen, border, rect, border_radius=br, width=bw)
-            _draw_shape(screen, elem[0], ELEM_COLORS[elem[1]],
-                        rect.centerx, rect.centery, btn_sz * 2 // 3)
+                pygame.draw.rect(screen, bg, rect, border_radius=br)
+                pygame.draw.rect(screen, border, rect, border_radius=br, width=bw)
+                _draw_shape(screen, elem[0], ELEM_COLORS[elem[1]],
+                            rect.centerx, rect.centery, btn_sz * 2 // 3)
 
         status_bar.draw(screen)
         pygame.display.flip()
