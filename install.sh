@@ -143,9 +143,20 @@ _pi_panel_reload() {
     [[ $_PANEL_CHANGED -eq 0 ]] && return
     # Reload the panel so the new button appears without a logout.
     if command -v wf-panel-pi &>/dev/null; then
-        pkill -HUP wf-panel-pi 2>/dev/null || true
+        # wf-panel-pi ignores SIGHUP — a full kill+restart is required.
+        # Only do this when a display is available (skip if running via SSH).
+        if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
+            pkill wf-panel-pi 2>/dev/null || true
+            sleep 0.4
+            wf-panel-pi >/dev/null 2>&1 &
+            disown
+            echo "  panel    → wf-panel-pi restarted"
+        else
+            echo "  panel    → run 'pkill wf-panel-pi; wf-panel-pi &' on the desktop to reload"
+        fi
     elif command -v lxpanelctl &>/dev/null; then
         lxpanelctl restart 2>/dev/null || true
+        echo "  panel    → LXPanel restarted"
     fi
 }
 
