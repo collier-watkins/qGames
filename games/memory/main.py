@@ -8,6 +8,7 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from shared.mqtt_stats import publish as mqtt_publish
 from shared.status_bar import StatusBar
 from shared.util import maximize_window, resource_path
 
@@ -175,6 +176,8 @@ def main():
                 matches += 1
                 pending.append([flipped[0], flipped[1], MATCH_ANIM_TTL])
                 flipped.clear()
+                if matches == TOTAL_PAIRS:
+                    mqtt_publish("memory", {"moves": moves, "result": "win"})
             else:
                 wait_ttl = FLIP_BACK_TTL
 

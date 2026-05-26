@@ -172,6 +172,18 @@ _pi_panel_reload() {
     fi
 }
 
+# ── MQTT config template ───────────────────────────────────────────────────────
+
+MQTT_CFG_DIR="$HOME/.config/qgames"
+MQTT_CFG="$MQTT_CFG_DIR/mqtt.env"
+if [[ ! -f "$MQTT_CFG" ]]; then
+    mkdir -p "$MQTT_CFG_DIR"
+    cp "$(dirname "$0")/mqtt.env.example" "$MQTT_CFG"
+    echo "Created MQTT config at $MQTT_CFG"
+    echo "  Edit it to add your broker IP and credentials."
+    echo ""
+fi
+
 # ── Install games ──────────────────────────────────────────────────────────────
 
 for GAME in "${GAMES[@]}"; do

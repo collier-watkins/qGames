@@ -55,6 +55,12 @@ echo ""
 ROOT="$PWD"
 mkdir -p dist
 
+# Include paho-mqtt hidden imports if installed on the build machine.
+PAHO_ARGS=()
+if python3 -c "import paho" &>/dev/null 2>&1; then
+    PAHO_ARGS=(--hidden-import paho.mqtt.publish --hidden-import paho.mqtt.client)
+fi
+
 for GAME in "${GAMES[@]}"; do
     GDIR="$ROOT/games/$GAME"
     if [[ ! -f "$GDIR/main.py" ]]; then
@@ -79,6 +85,7 @@ for GAME in "${GAMES[@]}"; do
         --add-data "$GDIR/assets:assets" \
         "${ICON_ARGS[@]}" \
         --hidden-import pygame \
+        "${PAHO_ARGS[@]}" \
         --log-level WARN \
         "$GDIR/main.py"
 

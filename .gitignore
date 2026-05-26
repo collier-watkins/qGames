@@ -4,3 +4,4 @@ build/
 .build-venv/
 __pycache__/
 *.pyc
+mqtt.env
