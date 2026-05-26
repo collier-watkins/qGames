@@ -51,6 +51,7 @@ _pi_panel_add() {
     # The panel watches the file via inotify — changes appear immediately.
     local WF="$HOME/.config/wf-panel-pi/wf-panel-pi.ini"
     if command -v wf-panel-pi &>/dev/null || [[ -f "$WF" ]]; then
+        echo "  wf-panel-pi config: $WF"
         # Ensure the config file and its directory exist.
         if [[ ! -f "$WF" ]]; then
             mkdir -p "$(dirname "$WF")"
@@ -167,14 +168,10 @@ PYEOF
 _pi_panel_reload() {
     [[ $_PANEL_CHANGED -eq 0 ]] && return
     if command -v wf-panel-pi &>/dev/null; then
-        # wf-panel-pi watches its config via inotify and reloads automatically.
-        # As a fallback, kill it so lwrespawn restarts it with the new config.
-        if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
-            pkill wf-panel-pi 2>/dev/null || true
-            echo "  panel    → wf-panel-pi reloaded"
-        else
-            echo "  panel    → run 'pkill wf-panel-pi' on the desktop to reload"
-        fi
+        # pkill works from SSH — no display session needed to send a signal.
+        # lwrespawn automatically restarts wf-panel-pi with the updated config.
+        pkill wf-panel-pi 2>/dev/null || true
+        echo "  panel    → wf-panel-pi reloaded"
     elif command -v lxpanelctl &>/dev/null; then
         lxpanelctl restart 2>/dev/null || true
         echo "  panel    → LXPanel restarted"
