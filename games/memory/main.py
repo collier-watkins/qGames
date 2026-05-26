@@ -1,6 +1,5 @@
 import math
 import os
-import random
 import secrets
 import sys
 
@@ -14,12 +13,15 @@ from shared.util import maximize_window, resource_path
 
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 
-TITLE = "Memory Match"
-FPS   = 60
-COLS, ROWS    = 4, 4
-CARD_GAP      = 12
-FLIP_BACK_TTL  = 75  # frames before unmatched pair flips back
-MATCH_ANIM_TTL = 55  # frames of match celebration before going green
+TITLE       = "Memory Match"
+FPS         = 30
+COLS, ROWS  = 4, 4
+CARD_GAP    = 12
+TOTAL_PAIRS = COLS * ROWS // 2
+
+# Tuned for 30 FPS (halved from original 60-FPS values to keep same real-time duration)
+FLIP_BACK_TTL  = 38   # ~1.25 s before unmatched pair flips back
+MATCH_ANIM_TTL = 28   # ~0.93 s of match-celebration ripple
 
 C_BG          = (25,  35,  60)
 C_BACK        = (50,  80, 160)
@@ -29,7 +31,6 @@ C_MATCHED     = ( 60, 170,  80)
 C_MATCHED_SYM = (255, 255, 255)
 C_HUD         = (160, 185, 230)
 
-# 8 distinct colours, one per pair
 PAIR_COLORS = [
     (220,  60,  60),
     ( 60, 130, 220),
@@ -53,8 +54,7 @@ class Card:
 
 
 def _new_deck() -> list[Card]:
-    pairs = list(range(COLS * ROWS // 2)) * 2
-    # Fisher-Yates using OS entropy for each swap (secrets.randbelow → os.urandom)
+    pairs = list(range(TOTAL_PAIRS)) * 2
     for i in range(len(pairs) - 1, 0, -1):
         j = secrets.randbelow(i + 1)
         pairs[i], pairs[j] = pairs[j], pairs[i]
@@ -89,17 +89,13 @@ def _draw_card(screen: pygame.Surface, card: Card):
 
     if card.matched:
         pygame.draw.rect(screen, C_MATCHED, r, border_radius=br)
-        # tick mark
         cx, cy = r.centerx, r.centery
         hw = r.width // 5
         pts = [(cx - hw, cy), (cx - hw // 3, cy + hw * 2 // 3), (cx + hw, cy - hw // 2)]
         pygame.draw.lines(screen, C_MATCHED_SYM, False, pts, max(3, r.width // 12))
-
     elif card.face_up:
         pygame.draw.rect(screen, C_FRONT, r, border_radius=br)
-        cr = max(8, r.width // 3)
-        pygame.draw.circle(screen, PAIR_COLORS[card.pair], r.center, cr)
-
+        pygame.draw.circle(screen, PAIR_COLORS[card.pair], r.center, max(8, r.width // 3))
     else:
         pygame.draw.rect(screen, C_BACK, r, border_radius=br)
         pygame.draw.rect(screen, C_BACK_BORDER, r, border_radius=br, width=3)
@@ -108,12 +104,11 @@ def _draw_card(screen: pygame.Surface, card: Card):
 
 
 def _draw_match_anim(screen: pygame.Surface, card: Card, ttl: int):
-    """Two expanding ripple rings in the pair's colour, fading outward."""
     color    = PAIR_COLORS[card.pair]
-    progress = 1.0 - ttl / MATCH_ANIM_TTL          # 0 → 1
+    progress = 1.0 - ttl / MATCH_ANIM_TTL
     max_r    = math.hypot(card.rect.width, card.rect.height) * 0.65
 
-    for lag in (0.0, 0.35):                         # second ring starts at 35 %
+    for lag in (0.0, 0.35):
         p = (progress - lag) / (1.0 - lag)
         if p <= 0:
             continue
@@ -138,25 +133,41 @@ def main():
     hud_font   = pygame.font.SysFont("sans", 20, bold=True)
     win_font   = pygame.font.SysFont("sans", 36, bold=True)
 
+    hud_surf = None
+    hud_key  = None   # (moves, matches, sw) — invalidate cache when any changes
+
+    cards    = []
+    flipped  = []
+    pending  = []
+    wait_ttl = 0
+    moves    = 0
+    matches  = 0
+    dirty    = True
+    last_sw = last_sh = last_status_h = 0
+
     def reset():
         nonlocal cards, flipped, pending, wait_ttl, moves, matches
+        nonlocal dirty, last_sw, last_sh, last_status_h
         cards    = _new_deck()
         flipped  = []
-        pending  = []   # [[idx_a, idx_b, ttl], ...]  — matched, animating
+        pending  = []
         wait_ttl = 0
         moves    = 0
         matches  = 0
+        dirty    = True
+        last_sw = last_sh = last_status_h = 0  # force layout recalc
 
     def try_flip(idx: int):
-        """Flip the card at grid index idx (shared by mouse and keyboard)."""
-        nonlocal moves, matches, wait_ttl
-        animating = {i for e in pending for i in (e[0], e[1])}
+        nonlocal moves, matches, wait_ttl, dirty
+        if wait_ttl or matches == TOTAL_PAIRS:
+            return
         card = cards[idx]
-        if (wait_ttl != 0 or all(c.matched for c in cards)
-                or card.face_up or card.matched or idx in animating):
+        animating = {i for e in pending for i in (e[0], e[1])}
+        if card.face_up or card.matched or idx in animating:
             return
         card.face_up = True
         flipped.append(idx)
+        dirty = True
         if len(flipped) == 2:
             moves += 1
             a, b = cards[flipped[0]], cards[flipped[1]]
@@ -167,19 +178,18 @@ def main():
             else:
                 wait_ttl = FLIP_BACK_TTL
 
-    cards    = []
-    flipped  = []
-    pending  = []
-    wait_ttl = 0
-    moves    = 0
-    matches  = 0
-    cursor   = [0, 0]   # [row, col]
     reset()
 
     running = True
     while running:
-        sw, sh = screen.get_size()
-        _layout(cards, sw, sh, status_bar.height)
+        sw, sh   = screen.get_size()
+        status_h = status_bar.height
+
+        # Recompute card positions only when the window or status bar changes.
+        if sw != last_sw or sh != last_sh or status_h != last_status_h:
+            _layout(cards, sw, sh, status_h)
+            last_sw, last_sh, last_status_h = sw, sh, status_h
+            dirty = True
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -188,25 +198,12 @@ def main():
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_r:
-                    cursor[:] = [0, 0]
                     reset()
-                # elif event.key == pygame.K_UP:
-                #     cursor[0] = max(0, cursor[0] - 1)
-                # elif event.key == pygame.K_DOWN:
-                #     cursor[0] = min(ROWS - 1, cursor[0] + 1)
-                # elif event.key == pygame.K_LEFT:
-                #     cursor[1] = max(0, cursor[1] - 1)
-                # elif event.key == pygame.K_RIGHT:
-                #     cursor[1] = min(COLS - 1, cursor[1] + 1)
-                # elif event.key in (pygame.K_RETURN, pygame.K_SPACE):
-                #     try_flip(cursor[0] * COLS + cursor[1])
-
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for i, card in enumerate(cards):
                     if card.rect.collidepoint(event.pos):
                         try_flip(i)
                         break
-
             status_bar.handle_event(event)
 
         if wait_ttl > 0:
@@ -215,6 +212,7 @@ def main():
                 for i in flipped:
                     cards[i].face_up = False
                 flipped = []
+                dirty = True
 
         for entry in pending[:]:
             entry[2] -= 1
@@ -222,40 +220,44 @@ def main():
                 cards[entry[0]].matched = True
                 cards[entry[1]].matched = True
                 pending.remove(entry)
+                dirty = True  # one more frame to show matched state
 
-        # ── draw ──────────────────────────────────────────────────────────────
-        screen.fill(C_BG)
+        if pending:
+            dirty = True  # ripple animation still in progress
 
-        hud = hud_font.render(
-            f"Memory Match   ·   moves: {moves}   ·   "
-            f"matched: {matches} / {COLS * ROWS // 2}   ·   R to restart",
-            True, C_HUD,
-        )
-        screen.blit(hud, (sw // 2 - hud.get_width() // 2, 16))
+        # Skip rendering entirely when nothing has changed.
+        if dirty:
+            screen.fill(C_BG)
 
-        for card in cards:
-            _draw_card(screen, card)
+            hud_k = (moves, matches, sw)
+            if hud_k != hud_key:
+                hud_surf = hud_font.render(
+                    f"Memory Match   ·   moves: {moves}   ·   "
+                    f"matched: {matches} / {TOTAL_PAIRS}   ·   R to restart",
+                    True, C_HUD,
+                )
+                hud_key = hud_k
+            screen.blit(hud_surf, (sw // 2 - hud_surf.get_width() // 2, 16))
 
-        for entry in pending:
-            for idx in (entry[0], entry[1]):
-                _draw_match_anim(screen, cards[idx], entry[2])
+            for card in cards:
+                _draw_card(screen, card)
 
-        # keyboard cursor highlight (disabled)
-        # cur_card = cards[cursor[0] * COLS + cursor[1]]
-        # br = max(6, cur_card.rect.width // 8)
-        # pygame.draw.rect(screen, (255, 240, 80),
-        #                  cur_card.rect.inflate(8, 8),
-        #                  width=4, border_radius=br + 4)
+            for entry in pending:
+                for idx in (entry[0], entry[1]):
+                    _draw_match_anim(screen, cards[idx], entry[2])
 
-        if all(c.matched for c in cards):
-            msg = win_font.render(
-                f"You won in {moves} moves!  —  press R to play again", True, (120, 240, 130)
-            )
-            screen.blit(msg, (sw // 2 - msg.get_width() // 2,
-                               sh // 2 - msg.get_height() // 2))
+            if matches == TOTAL_PAIRS:
+                msg = win_font.render(
+                    f"You won in {moves} moves!  —  press R to play again",
+                    True, (120, 240, 130),
+                )
+                screen.blit(msg, (sw // 2 - msg.get_width() // 2,
+                                   sh // 2 - msg.get_height() // 2))
 
-        status_bar.draw(screen)
-        pygame.display.flip()
+            status_bar.draw(screen)
+            pygame.display.flip()
+            dirty = False
+
         clock.tick(FPS)
 
     pygame.quit()
