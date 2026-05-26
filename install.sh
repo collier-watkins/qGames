@@ -80,10 +80,11 @@ if re.search(r'(?m)^launchers\s*=.*\b' + re.escape(game) + r'\b', conf):
     sys.exit(0)
 
 def append_game(m):
-    vals = [v.strip() for v in re.split(r'[;\s]+', m.group(1).strip()) if v.strip()]
+    # wf-panel-pi separates launcher entries with spaces (not semicolons).
+    vals = [v.strip() for v in m.group(1).strip().split() if v.strip()]
     if game not in vals:
         vals.append(game)
-    return 'launchers=' + ';'.join(vals)
+    return 'launchers=' + ' '.join(vals)
 
 if re.search(r'(?m)^launchers\s*=', conf):
     # Append to the existing launchers= line.
