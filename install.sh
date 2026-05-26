@@ -47,61 +47,52 @@ _pi_panel_add() {
 
     # ── wf-panel-pi  (Raspberry Pi OS Bookworm / Wayland) ────────────────────
     # Config: ~/.config/wf-panel-pi/wf-panel-pi.ini
-    # Format: launcher_000001=game.desktop  under [panel]
+    # Format: launchers=app1;app2  (app name only, no .desktop, under [panel])
     # The panel watches the file via inotify — changes appear immediately.
     local WF="$HOME/.config/wf-panel-pi/wf-panel-pi.ini"
     if command -v wf-panel-pi &>/dev/null || [[ -f "$WF" ]]; then
-        echo "  wf-panel-pi config: $WF"
         # Ensure the config file and its directory exist.
         if [[ ! -f "$WF" ]]; then
             mkdir -p "$(dirname "$WF")"
-            # Try seeding from the system default first.
             local _seed
             for _seed in \
                     /etc/xdg/wf-panel-pi/wf-panel-pi.ini \
                     /etc/xdg/wf-panel-pi.ini; do
                 if [[ -f "$_seed" ]]; then cp "$_seed" "$WF"; break; fi
             done
-            # No system config — create a minimal stub.
-            # wf-panel-pi merges this with its compiled-in defaults.
             [[ ! -f "$WF" ]] && printf '[panel]\n' > "$WF"
         fi
-        if ! grep -qF "${GAME}.desktop" "$WF" 2>/dev/null; then
+        if ! grep -qE "^launchers[[:space:]]*=.*\b${GAME}\b" "$WF" 2>/dev/null; then
             python3 - "$WF" "$GAME" <<'PYEOF'
 import sys, re
 path, game = sys.argv[1], sys.argv[2]
-desktop = game + '.desktop'
 
 with open(path) as f:
     conf = f.read()
 
-if desktop in conf:
+# Remove stale numbered-format entries from previous install attempts.
+conf = re.sub(r'(?m)^launcher_\d{6}=.*\n?', '', conf)
+
+# Already present in launchers= list?
+if re.search(r'(?m)^launchers\s*=.*\b' + re.escape(game) + r'\b', conf):
+    with open(path, 'w') as f:
+        f.write(conf)
     sys.exit(0)
 
-# Find the highest existing launcher_XXXXXX number in [panel].
-nums = [int(m.group(1)) for m in re.finditer(r'(?m)^launcher_(\d{6})\s*=', conf)]
-next_num = max(nums, default=0) + 1
-new_line = 'launcher_{:06d}={}\n'.format(next_num, desktop)
+def append_game(m):
+    vals = [v.strip() for v in re.split(r'[;\s]+', m.group(1).strip()) if v.strip()]
+    if game not in vals:
+        vals.append(game)
+    return 'launchers=' + ';'.join(vals)
 
-panel_m = re.search(r'(?m)^\[panel\]', conf)
-if panel_m:
-    # Find where the [panel] section ends (next section header or EOF).
-    section_start = panel_m.end()
-    next_sec = re.search(r'(?m)^\[', conf[section_start:])
-    section_end = section_start + next_sec.start() if next_sec else len(conf)
-    panel_body = conf[section_start:section_end]
-
-    # Insert after the last launcher_ line, or right after [panel]\n.
-    last = None
-    for m in re.finditer(r'(?m)^launcher_\d{6}=.*\n?', panel_body):
-        last = m
-    if last:
-        insert_at = section_start + last.end()
-    else:
-        insert_at = panel_m.end() + (1 if conf[panel_m.end():panel_m.end()+1] == '\n' else 0)
-    conf = conf[:insert_at] + new_line + conf[insert_at:]
+if re.search(r'(?m)^launchers\s*=', conf):
+    # Append to the existing launchers= line.
+    conf = re.sub(r'(?m)^launchers\s*=(.*)', append_game, conf)
+elif re.search(r'(?m)^\[panel\]', conf):
+    # [panel] exists but no launchers= key yet.
+    conf = re.sub(r'(?m)(^\[panel\]\n)', r'\1launchers=' + game + '\n', conf)
 else:
-    conf = conf.rstrip() + '\n\n[panel]\n' + new_line
+    conf = conf.rstrip() + '\n\n[panel]\nlaunchers=' + game + '\n'
 
 with open(path, 'w') as f:
     f.write(conf)
