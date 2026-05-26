@@ -49,11 +49,21 @@ _pi_panel_add() {
     # The panel stores a semicolon-separated list of app-IDs in [launchers].
     local WF="$HOME/.config/wf-panel-pi.ini"
     if command -v wf-panel-pi &>/dev/null || [[ -f "$WF" ]]; then
-        # Seed user config from system default if absent
-        if [[ ! -f "$WF" ]] && [[ -f /etc/xdg/wf-panel-pi.ini ]]; then
-            cp /etc/xdg/wf-panel-pi.ini "$WF"
+        # Ensure a user config exists to modify.
+        if [[ ! -f "$WF" ]]; then
+            # Try copying the system default first.
+            local _seed
+            for _seed in /etc/xdg/wf-panel-pi.ini /usr/share/wf-panel-pi/wf-panel-pi.ini; do
+                if [[ -f "$_seed" ]]; then cp "$_seed" "$WF"; break; fi
+            done
+            # No system config found — create a minimal stub.
+            # wf-panel-pi merges user config with built-in defaults,
+            # so we only need to declare the launchers section.
+            if [[ ! -f "$WF" ]]; then
+                printf '[launchers]\nlaunchers = \n' > "$WF"
+            fi
         fi
-        if [[ -f "$WF" ]] && ! grep -qw "$GAME" "$WF" 2>/dev/null; then
+        if ! grep -qw "$GAME" "$WF" 2>/dev/null; then
             python3 - "$WF" "$GAME" <<'PYEOF'
 import sys, re
 path, game = sys.argv[1], sys.argv[2]
@@ -143,16 +153,13 @@ _pi_panel_reload() {
     [[ $_PANEL_CHANGED -eq 0 ]] && return
     # Reload the panel so the new button appears without a logout.
     if command -v wf-panel-pi &>/dev/null; then
-        # wf-panel-pi ignores SIGHUP — a full kill+restart is required.
-        # Only do this when a display is available (skip if running via SSH).
+        # wf-panel-pi ignores SIGHUP. Kill it; lwrespawn (its watchdog) restarts
+        # it automatically with the new config. Only do this on a live display.
         if [[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ]]; then
             pkill wf-panel-pi 2>/dev/null || true
-            sleep 0.4
-            wf-panel-pi >/dev/null 2>&1 &
-            disown
-            echo "  panel    → wf-panel-pi restarted"
+            echo "  panel    → wf-panel-pi reloaded"
         else
-            echo "  panel    → run 'pkill wf-panel-pi; wf-panel-pi &' on the desktop to reload"
+            echo "  panel    → run 'pkill wf-panel-pi' on the desktop to reload"
         fi
     elif command -v lxpanelctl &>/dev/null; then
         lxpanelctl restart 2>/dev/null || true
