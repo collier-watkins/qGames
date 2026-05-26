@@ -159,9 +159,11 @@ PYEOF
 _pi_panel_reload() {
     [[ $_PANEL_CHANGED -eq 0 ]] && return
     if command -v wf-panel-pi &>/dev/null; then
-        # pkill works from SSH — no display session needed to send a signal.
-        # lwrespawn automatically restarts wf-panel-pi with the updated config.
-        pkill wf-panel-pi 2>/dev/null || true
+        # SIGKILL (not SIGTERM) — wf-panel-pi writes its in-memory launcher state
+        # back to the config file on graceful exit, which would overwrite our
+        # changes. SIGKILL prevents that; lwrespawn restarts the panel and it
+        # reads the config we just wrote.
+        pkill -KILL wf-panel-pi 2>/dev/null || true
         echo "  panel    → wf-panel-pi reloaded"
     elif command -v lxpanelctl &>/dev/null; then
         lxpanelctl restart 2>/dev/null || true
