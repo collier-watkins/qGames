@@ -243,7 +243,7 @@ class Toolbar:
                 "k_redo":   kfont.render("⌃Y",  True, dim),
                 "k_redo_d": kfont.render("⌃Y",  True, _CTXTD),
                 "k_C":      kfont.render("C",   True, dim),
-                "k_save":   kfont.render("⌃S",  True, dim),
+                "k_save":   kfont.render("S",   True, dim),
             }
             self._num_labels = [
                 nfont.render("0" if i == 9 else str(i + 1), True, dim)
@@ -344,8 +344,9 @@ class Toolbar:
             x += sw_size + _PAD
         x += _PAD
 
-        # ── Brush size: [−] N px [+] ──────────────────────────────────────
-        sby = (H - SBW) // 2
+        # ── Brush size: [−] N px [+] — aligned with palette swatches ────────
+        swatch_cy = swatch_ty + sw_size // 2
+        sby = swatch_ty + (sw_size - SBW) // 2
         self._size_minus = pygame.Rect(x, sby, SBW, SBW)
         c = _CBTNH if self._size_minus.collidepoint(mouse) else _CBTN
         pygame.draw.rect(screen, c, self._size_minus, border_radius=4)
@@ -355,7 +356,7 @@ class Toolbar:
         x += SBW + 4
 
         sz_t = self._brush_px()
-        screen.blit(sz_t, (x, cy - sz_t.get_height() // 2))
+        screen.blit(sz_t, (x, swatch_cy - sz_t.get_height() // 2))
         x += max(36, sz_t.get_width() + 4)
 
         self._size_plus = pygame.Rect(x, sby, SBW, SBW)
@@ -367,9 +368,9 @@ class Toolbar:
         x += SBW + _PAD
 
         # ── Brush preview circle ──────────────────────────────────────────
-        pr = min(self.brush, cy - 6)
-        pygame.draw.circle(screen, self.color, (x + pr, cy), pr)
-        pygame.draw.circle(screen, (110, 110, 110), (x + pr, cy), pr, 1)
+        pr = min(self.brush, swatch_cy - swatch_ty - 2)
+        pygame.draw.circle(screen, self.color, (x + pr, swatch_cy), pr)
+        pygame.draw.circle(screen, (110, 110, 110), (x + pr, swatch_cy), pr, 1)
 
         # ── Right-aligned: [TB−][TB+]  [Undo][Redo][Clear][Save] ─────────
         right_edge = sw - _PAD
@@ -615,7 +616,7 @@ def main():
                         canvas.undo()
                 elif event.key == pygame.K_y and (event.mod & pygame.KMOD_CTRL):
                     canvas.redo()
-                elif event.key == pygame.K_s and (event.mod & pygame.KMOD_CTRL):
+                elif event.key == pygame.K_s:
                     _path        = canvas.save()
                     save_msg     = f"Saved → {_path}"
                     save_msg_ttl = FPS * 4
