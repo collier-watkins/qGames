@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-ALL_GAMES=(paint memory letters battleship sequence)
+ALL_GAMES=(paint memory letters battleship sequence simon)
 PYINSTALLER_VER="6.3.0"
 BUILD_VENV=".build-venv"
 

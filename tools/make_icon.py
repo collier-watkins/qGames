@@ -132,4 +132,21 @@ ql = fq.render("?", True, (200, 220, 70))
 s.blit(ql, (cx4 - ql.get_width() // 2, cy4 - ql.get_height() // 2))
 save(s, "games", "sequence", "assets", "icons", "sequence.png")
 
+# ── simon ─────────────────────────────────────────────────────────────────────
+# 4 coloured quadrant squares, each with one rounded outer corner, inside a
+# near-black circle. A dark hub circle covers the inner corners.
+s = pygame.Surface((SIZE, SIZE), pygame.SRCALPHA)
+pygame.draw.circle(s, (10, 10, 14), (C, C), C)
+PAD = 40; IGAP = 8
+QS  = C - PAD - IGAP // 2   # quadrant square size (fits within the circle)
+for color, (rx, ry), kw in [
+    ((55, 210, 85),  (PAD,          PAD),          {"border_top_left_radius": 24}),
+    ((220, 55, 55),  (C + IGAP//2,  PAD),          {"border_top_right_radius": 24}),
+    ((240, 210, 50), (PAD,          C + IGAP//2),  {"border_bottom_left_radius": 24}),
+    ((60, 130, 220), (C + IGAP//2,  C + IGAP//2),  {"border_bottom_right_radius": 24}),
+]:
+    pygame.draw.rect(s, color, (rx, ry, QS, QS), **kw)
+pygame.draw.circle(s, (10, 10, 14), (C, C), C // 4)
+save(s, "games", "simon", "assets", "icons", "simon.png")
+
 print("Done.")
