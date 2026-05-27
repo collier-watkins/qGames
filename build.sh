@@ -17,6 +17,16 @@ if [[ $# -gt 0 ]]; then
     GAMES=("$@")
 fi
 
+# Validate names up front so we don't do a partial build on a typo.
+for GAME in "${GAMES[@]}"; do
+    valid=0
+    for g in "${ALL_GAMES[@]}"; do [[ "$g" == "$GAME" ]] && valid=1 && break; done
+    if [[ $valid -eq 0 ]]; then
+        echo "ERROR: unknown game '$GAME'. Known games: ${ALL_GAMES[*]}"
+        exit 1
+    fi
+done
+
 echo "Building: ${GAMES[*]}  [linux/$(uname -m)]"
 echo ""
 

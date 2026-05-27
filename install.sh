@@ -18,6 +18,14 @@ if [[ $# -gt 0 ]]; then
     GAMES=("$@")
 fi
 
+# Validate names up front so we don't do a partial install on a typo.
+for GAME in "${GAMES[@]}"; do
+    if [[ -z "${GAME_NAMES[$GAME]+x}" ]]; then
+        echo "ERROR: unknown game '$GAME'. Known games: ${ALL_GAMES[*]}"
+        exit 1
+    fi
+done
+
 BIN_DIR="$HOME/.local/bin"
 ICON_DIR="$HOME/.local/share/icons/hicolor"
 DESK_DIR="$HOME/.local/share/applications"
