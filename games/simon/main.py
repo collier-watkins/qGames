@@ -148,11 +148,12 @@ def main():
     dirty     = True
 
     def _start_showing():
-        nonlocal state, show_idx, show_phase, show_timer
-        _, gp_f    = _timing(round_num)
+        nonlocal state, show_idx, show_phase, show_timer, flash_btn, flash_ttl
         show_idx   = 0
         show_phase = "gap"
-        show_timer = gp_f
+        show_timer = int(FPS * 1.2)   # pause before first button lights up
+        flash_btn  = -1               # clear any stale flash from previous round
+        flash_ttl  = 0
         state      = "showing"
 
     while True:
@@ -227,6 +228,8 @@ def main():
                     if show_idx >= len(sequence):
                         state     = "input"
                         input_idx = 0
+                        flash_btn = -1   # clear stale flash so previous round's last press doesn't appear
+                        flash_ttl = 0
                     else:
                         _, gp_f    = _timing(round_num)
                         show_phase = "gap"
@@ -296,20 +299,21 @@ def main():
             screen.blit(lbl, lbl.get_rect(centerx=cx, centery=cy))
 
         elif state == "fail":
-            t1 = big_font.render("Oops!", True, C_FAIL)
-            t2 = sml_font.render(f"Round {round_num}", True, C_TEXT)
-            gap = 5
-            show_best = best > 0
-            t3 = sml_font.render(f"Best: {best}", True, C_SUBT) if show_best else None
-            total = t1.get_height() + gap + t2.get_height()
+            score     = round_num - 1
+            show_best = best > 1
+            items = [
+                big_font.render("Oops!",  True, C_FAIL),
+                med_font.render(f"Score: {score}", True, C_TEXT),
+            ]
             if show_best:
-                total += gap + t3.get_height()
-            y = cy - total // 2
-            screen.blit(t1, t1.get_rect(centerx=cx, top=y)); y += t1.get_height() + gap
-            screen.blit(t2, t2.get_rect(centerx=cx, top=y))
-            if show_best:
-                y += t2.get_height() + gap
-                screen.blit(t3, t3.get_rect(centerx=cx, top=y))
+                items.append(sml_font.render(f"Best: {best}", True, C_SUBT))
+            items.append(sml_font.render("Tap to play again", True, C_SUBT))
+            gap   = 6
+            total = sum(t.get_height() for t in items) + gap * (len(items) - 1)
+            y     = cy - total // 2
+            for t in items:
+                screen.blit(t, t.get_rect(centerx=cx, top=y))
+                y += t.get_height() + gap
 
         status_bar.draw(screen)
         pygame.display.flip()
