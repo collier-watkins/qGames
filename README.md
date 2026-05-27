@@ -60,6 +60,15 @@ Executables are architecture-specific — build on the target machine (Pi for AR
 Installs to `~/.local/bin/`, icons to `~/.local/share/icons/`, and `.desktop` entries
 to `~/.local/share/applications/`. No `sudo` required.
 
+## Uninstalling
+
+```bash
+./uninstall.sh          # uninstall all games
+./uninstall.sh paint    # uninstall one game
+```
+
+Removes the binary, icons, `.desktop` entry, and taskbar launcher entry. No `sudo` required.
+
 On Raspberry Pi OS (Bookworm/Wayland) the games are also added to the taskbar launcher automatically.
 
 ---
