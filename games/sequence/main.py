@@ -52,61 +52,49 @@ ELEM_COLORS = {
 
 # ── Pattern library ────────────────────────────────────────────────────────────
 # Each entry is a list of (shape, color_name) tuples — the repeating period.
-# Shapes: "circle"  "square"  "triangle"  "diamond"  "hexagon"  "star"
+# Kept simple for 3-4 year olds: only circle/square/triangle/star,
+# only primary colours, only AB and AAB/ABB pattern types.
 
 PATTERNS = [
-    # AB colour, same shape
-    [("circle",   "blue"),    ("circle",   "red")],
-    [("circle",   "green"),   ("circle",   "yellow")],
-    [("square",   "blue"),    ("square",   "orange")],
-    [("square",   "red"),     ("square",   "purple")],
-    [("triangle", "teal"),    ("triangle", "pink")],
-    [("diamond",  "blue"),    ("diamond",  "green")],
-    [("hexagon",  "purple"),  ("hexagon",  "yellow")],
-    [("star",     "orange"),  ("star",     "teal")],
-    # AAB colour, same shape
+    # AB colour, same shape (simplest — only one thing changes)
+    [("circle",   "blue"),   ("circle",   "red")],
+    [("circle",   "red"),    ("circle",   "yellow")],
+    [("circle",   "green"),  ("circle",   "blue")],
+    [("circle",   "yellow"), ("circle",   "green")],
+    [("square",   "blue"),   ("square",   "red")],
+    [("square",   "red"),    ("square",   "green")],
+    [("square",   "yellow"), ("square",   "orange")],
+    [("square",   "orange"), ("square",   "blue")],
+    [("triangle", "red"),    ("triangle", "blue")],
+    [("triangle", "green"),  ("triangle", "yellow")],
+    [("triangle", "blue"),   ("triangle", "orange")],
+    [("star",     "orange"), ("star",     "blue")],
+    [("star",     "red"),    ("star",     "green")],
+    [("star",     "yellow"), ("star",     "red")],
+    # AB shape, same colour (one thing changes)
+    [("circle",   "red"),    ("square",   "red")],
+    [("circle",   "blue"),   ("triangle", "blue")],
+    [("square",   "green"),  ("triangle", "green")],
+    [("triangle", "yellow"), ("circle",   "yellow")],
+    [("star",     "orange"), ("circle",   "orange")],
+    [("square",   "red"),    ("star",     "red")],
+    [("circle",   "blue"),   ("star",     "blue")],
+    [("triangle", "green"),  ("square",   "green")],
+    # AAB colour, same shape (two the same, then one different)
     [("circle",   "blue"),   ("circle",   "blue"),   ("circle",   "red")],
+    [("circle",   "red"),    ("circle",   "red"),    ("circle",   "blue")],
     [("square",   "green"),  ("square",   "green"),  ("square",   "yellow")],
-    [("circle",   "orange"), ("circle",   "orange"), ("circle",   "purple")],
-    [("triangle", "pink"),   ("triangle", "pink"),   ("triangle", "teal")],
-    # ABB colour, same shape
+    [("square",   "yellow"), ("square",   "yellow"), ("square",   "orange")],
+    [("triangle", "yellow"), ("triangle", "yellow"), ("triangle", "green")],
+    [("triangle", "blue"),   ("triangle", "blue"),   ("triangle", "red")],
+    [("star",     "orange"), ("star",     "orange"), ("star",     "blue")],
+    # ABB colour, same shape (one, then two the same)
     [("circle",   "blue"),   ("circle",   "red"),    ("circle",   "red")],
-    [("square",   "orange"), ("square",   "purple"), ("square",   "purple")],
-    [("triangle", "teal"),   ("triangle", "pink"),   ("triangle", "pink")],
-    [("diamond",  "green"),  ("diamond",  "yellow"), ("diamond",  "yellow")],
-    # ABC colour, same shape
-    [("circle", "red"),    ("circle", "blue"),   ("circle",  "green")],
-    [("square", "yellow"), ("square", "orange"), ("square",  "purple")],
-    [("circle", "pink"),   ("circle", "teal"),   ("circle",  "blue")],
-    [("star",   "red"),    ("star",   "green"),  ("star",    "yellow")],
-    # ABBA colour, same shape
-    [("circle", "red"),   ("circle", "blue"),   ("circle", "blue"),   ("circle", "red")],
-    [("square", "green"), ("square", "yellow"), ("square", "yellow"), ("square", "green")],
-    # AB shape, same colour
-    [("circle",   "blue"),    ("square",   "blue")],
-    [("triangle", "red"),     ("diamond",  "red")],
-    [("hexagon",  "green"),   ("circle",   "green")],
-    [("star",     "purple"),  ("square",   "purple")],
-    [("triangle", "orange"),  ("hexagon",  "orange")],
-    # ABC shape, same colour
-    [("circle",   "red"),    ("triangle", "red"),    ("square",   "red")],
-    [("diamond",  "blue"),   ("circle",   "blue"),   ("triangle", "blue")],
-    [("hexagon",  "green"),  ("square",   "green"),  ("star",     "green")],
-    [("star",     "yellow"), ("diamond",  "yellow"), ("circle",   "yellow")],
-    # AB shape + AB colour
-    [("circle",   "blue"),    ("square",   "red")],
-    [("triangle", "orange"),  ("diamond",  "purple")],
-    [("circle",   "teal"),    ("hexagon",  "pink")],
-    [("star",     "green"),   ("triangle", "yellow")],
-    # ABC mixed
-    [("circle",   "red"),    ("square",   "blue"),   ("triangle", "green")],
-    [("triangle", "orange"), ("circle",   "purple"), ("square",   "teal")],
-    [("diamond",  "pink"),   ("circle",   "yellow"), ("hexagon",  "red")],
-    [("star",     "blue"),   ("diamond",  "orange"), ("circle",   "pink")],
-    # ABAC mixed
-    [("circle",   "blue"),   ("square",   "red"),    ("circle",  "blue"),   ("triangle", "green")],
-    [("star",     "purple"), ("circle",   "orange"), ("star",    "purple"), ("diamond",  "teal")],
-    [("triangle", "teal"),   ("hexagon",  "pink"),   ("triangle","teal"),   ("circle",   "yellow")],
+    [("circle",   "yellow"), ("circle",   "green"),  ("circle",   "green")],
+    [("square",   "green"),  ("square",   "yellow"), ("square",   "yellow")],
+    [("square",   "orange"), ("square",   "blue"),   ("square",   "blue")],
+    [("triangle", "red"),    ("triangle", "blue"),   ("triangle", "blue")],
+    [("star",     "blue"),   ("star",     "orange"), ("star",     "orange")],
 ]
 
 _ALL_ELEMENTS = list({elem for pat in PATTERNS for elem in pat})
@@ -177,7 +165,7 @@ def _new_question() -> tuple:
     period  = len(pattern)
 
     min_show = 2 * period
-    max_show = min(10, 3 * period + period - 1)
+    max_show = min(7, 3 * period + period - 1)
     n_shown  = secrets.randbelow(max(1, max_show - min_show + 1)) + min_show
 
     offset   = secrets.randbelow(period)
