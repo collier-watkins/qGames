@@ -20,7 +20,9 @@ fi
 
 # Validate names up front so we don't do a partial install on a typo.
 for GAME in "${GAMES[@]}"; do
-    if [[ -z "${GAME_NAMES[$GAME]+x}" ]]; then
+    valid=0
+    for g in "${ALL_GAMES[@]}"; do [[ "$g" == "$GAME" ]] && valid=1 && break; done
+    if [[ $valid -eq 0 ]]; then
         echo "ERROR: unknown game '$GAME'. Known games: ${ALL_GAMES[*]}"
         exit 1
     fi
