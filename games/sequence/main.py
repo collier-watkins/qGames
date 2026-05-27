@@ -268,26 +268,30 @@ def main():
         n_cells  = len(visible) + 1
         cell_gap = max(5, min(14, avail_w // max(1, n_cells * 9)))
 
-        # Width-constrained sizes (uncapped)
+        # Width-constrained sizes
         cell_from_w = max(28, (avail_w - cell_gap * (n_cells - 1)) // n_cells)
-        btn_from_w  = max(40, (avail_w - 5 * 8) // 4)
+        BTN_COL_GAP = 16
+        BTN_ROW_GAP = 12
+        btn_from_w  = max(40, (avail_w - BTN_COL_GAP) // 2)   # 2 columns
 
-        cell_sz = min(cell_from_w, 110)
-        btn_sz  = min(btn_from_w,  150)
+        cell_sz    = min(cell_from_w, 110)
+        btn_sz     = min(btn_from_w,  175)
+        btn_zone_h = 2 * btn_sz + BTN_ROW_GAP
 
         # Scale down proportionally if content exceeds available height
-        content_h = cell_sz + VGAP + PROMPT_H + VGAP + btn_sz
+        content_h = cell_sz + VGAP + PROMPT_H + VGAP + btn_zone_h
         if content_h > avail_h - 8:
-            scale   = (avail_h - 8) / content_h
-            cell_sz = max(28, int(cell_sz * scale))
-            btn_sz  = max(40, int(btn_sz  * scale))
-            content_h = cell_sz + VGAP + PROMPT_H + VGAP + btn_sz
+            scale      = (avail_h - 8) / content_h
+            cell_sz    = max(28, int(cell_sz * scale))
+            btn_sz     = max(40, int(btn_sz  * scale))
+            btn_zone_h = 2 * btn_sz + BTN_ROW_GAP
+            content_h  = cell_sz + VGAP + PROMPT_H + VGAP + btn_zone_h
 
         # Vertical centre of content block
         content_top = HUD_H + PROG_H + max(0, (avail_h - content_h) // 2)
         seq_cy      = content_top + cell_sz // 2
         prompt_y    = content_top + cell_sz + VGAP
-        btn_y       = prompt_y + PROMPT_H + VGAP
+        btn_top     = prompt_y + PROMPT_H + VGAP
 
         # Lazy q-font rebuild
         if cell_sz != last_cell_sz:
@@ -300,10 +304,13 @@ def main():
         total_seq_w = n_cells * cell_sz + (n_cells - 1) * cell_gap
         seq_ox      = (sw - total_seq_w) // 2 + cell_sz // 2
 
-        # Button horizontal layout
-        btn_gap   = max(8, min(32, (avail_w - 4 * btn_sz) // 5))
+        # 2×2 button grid — centred horizontally
+        grid_w    = 2 * btn_sz + BTN_COL_GAP
+        grid_x    = (sw - grid_w) // 2
         btn_rects = [
-            pygame.Rect(40 + btn_gap + i * (btn_sz + btn_gap), btn_y, btn_sz, btn_sz)
+            pygame.Rect(grid_x + (i % 2) * (btn_sz + BTN_COL_GAP),
+                        btn_top + (i // 2) * (btn_sz + BTN_ROW_GAP),
+                        btn_sz, btn_sz)
             for i in range(4)
         ]
 
