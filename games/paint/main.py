@@ -159,21 +159,26 @@ def _icon_redo(surf, cx, cy, sz, color):
 
 
 def _icon_trash(surf, cx, cy, sz, color):
-    lw = max(2, sz // 8)
-    bw = max(10, sz * 9 // 16)
-    bh = max(10, sz * 10 // 16)
-    bx = cx - bw // 2
-    by = cy - bh // 3
-    pygame.draw.rect(surf, color, (bx, by, bw, bh), lw, border_radius=2)
-    lid_y = by - lw - 1
-    pygame.draw.line(surf, color, (bx - 3, lid_y), (bx + bw + 3, lid_y), lw)
-    hw = bw // 3
-    hy = lid_y - lw * 3
-    pygame.draw.line(surf, color, (cx - hw, lid_y), (cx - hw, hy), lw)
-    pygame.draw.line(surf, color, (cx + hw, lid_y), (cx + hw, hy), lw)
-    pygame.draw.line(surf, color, (cx - hw, hy),    (cx + hw, hy), lw)
-    for dx in (-bw // 4, bw // 4):
-        pygame.draw.line(surf, color, (cx + dx, by + lw + 2), (cx + dx, by + bh - lw - 2), lw)
+    lw  = max(2, sz // 9)
+    bw  = max(12, sz * 10 // 18)
+    bh  = max(14, sz * 11 // 18)
+    bx  = cx - bw // 2
+    by  = cy - bh * 2 // 5
+    # Body
+    pygame.draw.rect(surf, color, (bx, by, bw, bh), lw, border_radius=3)
+    # Lid: horizontal line wider than the body
+    lid_y = by - lw
+    pygame.draw.line(surf, color, (bx - 4, lid_y), (bx + bw + 4, lid_y), lw)
+    # Handle: small semicircle arc centred above the lid
+    hw = max(5, bw // 4)
+    arc_rect = pygame.Rect(cx - hw, lid_y - hw, hw * 2, hw * 2)
+    pygame.draw.arc(surf, color, arc_rect, 0, math.pi, lw)
+    # Two ribs inside the body
+    rib_x = bw // 5
+    for dx in (-rib_x, rib_x):
+        pygame.draw.line(surf, color,
+                         (cx + dx, by + lw + 3),
+                         (cx + dx, by + bh - lw - 3), lw)
 
 
 def _icon_save(surf, cx, cy, sz, color):
@@ -202,7 +207,6 @@ class Toolbar:
         self.tool      = TOOL_BRUSH
 
         self._swatches   = []
-        self._tool_rects = {}
         self._size_minus = pygame.Rect(0, 0, 0, 0)
         self._size_plus  = pygame.Rect(0, 0, 0, 0)
         self._undo_btn   = pygame.Rect(0, 0, 0, 0)
@@ -234,8 +238,6 @@ class Toolbar:
                 "plus":     f.render("+",   True, _CTXT),
                 "tbp":      f.render("+",   True, (148, 148, 165)),
                 "tbm":      f.render("−",   True, (148, 148, 165)),
-                "k_P":      kfont.render("P",   True, dim),
-                "k_B":      kfont.render("B",   True, dim),
                 "k_undo":   kfont.render("⌃Z",  True, dim),
                 "k_undo_d": kfont.render("⌃Z",  True, _CTXTD),
                 "k_redo":   kfont.render("⌃Y",  True, dim),
@@ -267,10 +269,6 @@ class Toolbar:
                 if r.collidepoint(event.pos):
                     self.color_idx = i
                     return None
-            for tool_id, r in self._tool_rects.items():
-                if r.collidepoint(event.pos):
-                    self.tool = tool_id
-                    return None
             if self._size_minus.collidepoint(event.pos):
                 self.brush = max(MIN_BRUSH, self.brush - 1)
                 return None
@@ -298,10 +296,6 @@ class Toolbar:
             if event.key in _KEY_COLOR:
                 self.color_idx = _KEY_COLOR[event.key]
                 self.tool      = TOOL_BRUSH
-            elif event.key == pygame.K_p:
-                self.tool = TOOL_BRUSH
-            elif event.key == pygame.K_b:
-                self.tool = TOOL_BUCKET
             elif event.key == pygame.K_LEFTBRACKET:
                 self.brush = max(MIN_BRUSH, self.brush - 1)
             elif event.key == pygame.K_RIGHTBRACKET:
@@ -348,25 +342,6 @@ class Toolbar:
             num = self._num_labels[i]
             screen.blit(num, (r.centerx - num.get_width() // 2, r.bottom + 2))
             x += sw_size + _PAD
-        x += _PAD
-
-        # ── Tool buttons: icon centred, key label at bottom ───────────────
-        self._tool_rects = {}
-        for tool_id, draw_fn, key_lbl in (
-            (TOOL_BRUSH,  _icon_brush,  t["k_P"]),
-            (TOOL_BUCKET, _icon_bucket, t["k_B"]),
-        ):
-            r      = pygame.Rect(x, btn_ty, TBH, TBH)
-            active = self.tool == tool_id
-            bg     = _CACT if active else (_CBTNH if r.collidepoint(mouse) else _CBTN)
-            self._tool_rects[tool_id] = r
-            pygame.draw.rect(screen, bg, r, border_radius=br6)
-            if active:
-                pygame.draw.rect(screen, (120, 160, 230), r, width=2, border_radius=br6)
-            kh = key_lbl.get_height()
-            draw_fn(screen, r.centerx, r.y + (TBH - kh - 4) // 2, icon_sz, _CTXT)
-            screen.blit(key_lbl, (r.centerx - key_lbl.get_width() // 2, r.bottom - kh - 3))
-            x += TBH + _PAD
         x += _PAD
 
         # ── Brush size: [−] N px [+] ──────────────────────────────────────
