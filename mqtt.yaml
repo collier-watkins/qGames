@@ -59,16 +59,11 @@ mqtt:
       icon: "mdi:target"
 
     # ── Sequence ─────────────────────────────────────────────────────────────
-    - name: "qGames Sequence Last Answered"
+    - name: "qGames Sequence Last Completed"
       unique_id: "qgames_sequence_ts"
       state_topic: "qGames/sequence/ts"
       value_template: "{{ value | int | timestamp_local }}"
       icon: "mdi:clock-outline"
-
-    - name: "qGames Sequence Result"
-      unique_id: "qgames_sequence_result"
-      state_topic: "qGames/sequence/result"
-      icon: "mdi:check-circle"
 
     - name: "qGames Sequence Score"
       unique_id: "qgames_sequence_score"
@@ -76,17 +71,11 @@ mqtt:
       unit_of_measurement: "correct"
       icon: "mdi:star"
 
-    - name: "qGames Sequence Questions Answered"
+    - name: "qGames Sequence Total"
       unique_id: "qgames_sequence_total"
       state_topic: "qGames/sequence/total"
       unit_of_measurement: "questions"
       icon: "mdi:counter"
-
-    - name: "qGames Sequence Round Score"
-      unique_id: "qgames_sequence_round_score"
-      state_topic: "qGames/sequence/round_score"
-      unit_of_measurement: "correct"
-      icon: "mdi:trophy"
 
     # ── Simon ─────────────────────────────────────────────────────────────────
     - name: "qGames Simon Last Played"

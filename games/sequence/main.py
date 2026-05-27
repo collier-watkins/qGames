@@ -339,10 +339,6 @@ def main():
                             q_num        += 1
                             state         = "feedback"
                             feedback_ttl  = FEEDBACK_TTL
-                            mqtt_publish("sequence/result", "correct" if is_correct else "wrong")
-                            mqtt_publish("sequence/score",  correct_total)
-                            mqtt_publish("sequence/total",  q_num)
-                            mqtt_publish("sequence/ts",     int(time.time()))
                             dirty = True
                             break
 
@@ -362,8 +358,9 @@ def main():
             if feedback_ttl == 0:
                 if q_num >= ROUND_SIZE:
                     state = "roundover"
-                    mqtt_publish("sequence/round_score", correct_total)
-                    mqtt_publish("sequence/ts",          int(time.time()))
+                    mqtt_publish("sequence/score", correct_total)
+                    mqtt_publish("sequence/total", q_num)
+                    mqtt_publish("sequence/ts",    int(time.time()))
                 else:
                     visible, answer, options, pattern = _new_question()
                     state        = "asking"
