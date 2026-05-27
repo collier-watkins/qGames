@@ -113,9 +113,16 @@ If `MQTT_BROKER` is blank the games skip publishing silently — no errors.
 
 ### Home Assistant sensors
 
-Each game's directory contains a `mqtt_sensor_sample.yaml` ready to copy into your
-`configuration.yaml`. Trigger automations off the `ts` sensor — it always changes,
-even when other values repeat.
+All sensors are consolidated in [`mqtt.yaml`](mqtt.yaml) at the repo root.
+Either copy the contents into your `configuration.yaml` under the `mqtt:` key,
+or use a direct include:
+
+```yaml
+mqtt: !include /path/to/qGames/mqtt.yaml
+```
+
+Trigger automations off the `ts` sensors — they always change, even when other
+values repeat.
 
 ---
 
