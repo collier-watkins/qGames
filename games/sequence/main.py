@@ -185,9 +185,9 @@ def _new_question() -> tuple:
 
 
 def _star_count(correct: int) -> int:
-    if correct >= 8: return 3
-    if correct >= 5: return 2
-    if correct >= 2: return 1
+    if correct == ROUND_SIZE: return 3
+    if correct >  6:          return 2
+    if correct >= 5:          return 1
     return 0
 
 
