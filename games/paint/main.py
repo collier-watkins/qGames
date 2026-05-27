@@ -606,10 +606,13 @@ def main():
             status_bar.handle_event(event)
 
         if toolbar.tool != last_tool:
-            if toolbar.tool == TOOL_BUCKET:
-                pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
-            else:
-                pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_CROSSHAIR)
+            try:
+                if toolbar.tool == TOOL_BUCKET:
+                    pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
+                else:
+                    pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_CROSSHAIR)
+            except pygame.error:
+                pass   # system cursor unavailable on this display server
             last_tool = toolbar.tool
 
         cr = _canvas_rect(screen, toolbar.height, status_bar.height)
