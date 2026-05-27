@@ -111,8 +111,10 @@ PYEOF
     # ── LXPanel  (Raspberry Pi OS Bullseye and older) ─────────────────────────
     # The panel config contains Plugin { type=launchbar Config { Button { id=... } } }.
     # We parse it with Python to insert a Button entry safely.
-    local LX
-    LX=$(find "$HOME/.config/lxpanel" -name "panel" -type f 2>/dev/null | head -1)
+    # Guard: directory may not exist on non-Pi systems (find exits 1 → pipefail).
+    local LX=""
+    [[ -d "$HOME/.config/lxpanel" ]] && \
+        LX=$(find "$HOME/.config/lxpanel" -name "panel" -type f 2>/dev/null | head -1) || true
     [[ -z "$LX" ]] && return   # not an LXPanel desktop — silently skip
 
     if ! grep -qF "$GAME" "$LX" 2>/dev/null; then

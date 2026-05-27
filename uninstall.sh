@@ -74,8 +74,9 @@ PYEOF
 
     # ── LXPanel  (Raspberry Pi OS Bullseye and older) ─────────────────────────
     local DESK="$DESK_DIR/$GAME.desktop"
-    local LX
-    LX=$(find "$HOME/.config/lxpanel" -name "panel" -type f 2>/dev/null | head -1)
+    local LX=""
+    [[ -d "$HOME/.config/lxpanel" ]] && \
+        LX=$(find "$HOME/.config/lxpanel" -name "panel" -type f 2>/dev/null | head -1) || true
     [[ -z "$LX" ]] && return   # not an LXPanel desktop — silently skip
 
     if grep -qF "$DESK" "$LX" 2>/dev/null; then
