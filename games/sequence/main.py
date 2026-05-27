@@ -274,8 +274,8 @@ def main():
         BTN_ROW_GAP = 12
         btn_from_w  = max(40, (avail_w - BTN_COL_GAP) // 2)   # 2 columns
 
-        cell_sz    = min(cell_from_w, 110)
-        btn_sz     = min(btn_from_w,  175)
+        cell_sz    = min(cell_from_w, 140)
+        btn_sz     = min(btn_from_w,   95)
         btn_zone_h = 2 * btn_sz + BTN_ROW_GAP
 
         # Scale down proportionally if content exceeds available height
@@ -490,7 +490,14 @@ def main():
 
             # "?" cell
             qx = seq_ox + len(visible) * (cell_sz + cell_gap)
-            _draw_q_cell(screen, qx, seq_cy, cell_sz, q_font)
+            if state == "feedback":
+                blink_on = (feedback_ttl // 5) % 2 == 0
+                border   = (C_CORRECT if is_correct else C_WRONG) if blink_on else C_CELL_BDR
+                bw       = max(4, cell_sz // 14) if blink_on else max(2, cell_sz // 24)
+                _draw_cell(screen, options[selected_idx], qx, seq_cy, cell_sz,
+                           border_color=border, border_w=bw)
+            else:
+                _draw_q_cell(screen, qx, seq_cy, cell_sz, q_font)
 
             # Prompt
             pr = prompt_font.render("What comes next?", True, C_PROMPT)
