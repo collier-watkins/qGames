@@ -544,8 +544,7 @@ def _do_save(canvas: "Canvas") -> str:
     """Save canvas, publish MQTT stats and image. Returns the saved path."""
     path = canvas.save()
     mqtt_publish("paint/saved", os.path.basename(path))
-    mqtt_publish("paint/ts",    int(time.time()))
-    mqtt_publish_image("paint/image", path)
+    mqtt_publish_image("paint/image", path, followup=[("paint/ts", int(time.time()))])
     return path
 
 

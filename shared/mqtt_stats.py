@@ -32,8 +32,13 @@ def _load_config() -> dict:
     return cfg
 
 
-def publish_image(subtopic: str, image_path: str) -> None:
-    """Fire-and-forget MQTT publish of a PNG file as raw binary with retain=True."""
+def publish_image(subtopic: str, image_path: str, followup: list = None) -> None:
+    """Publish a PNG as raw binary (retain=True), then any followup (subtopic, value) pairs.
+
+    All messages are sent in one connection so they arrive at the broker in order —
+    image first, then followup topics. This prevents automations triggered by a
+    followup topic from firing before the image entity has updated.
+    """
     cfg = _load_config()
     if not cfg["MQTT_BROKER"]:
         return
@@ -43,17 +48,18 @@ def publish_image(subtopic: str, image_path: str) -> None:
             import paho.mqtt.publish as mqtt_pub
             with open(image_path, "rb") as f:
                 payload = f.read()
-            topic = f"{cfg['MQTT_TOPIC_PREFIX']}/{subtopic}"
-            auth = None
+            prefix = cfg["MQTT_TOPIC_PREFIX"]
+            auth   = None
             if cfg["MQTT_USERNAME"]:
                 auth = {"username": cfg["MQTT_USERNAME"], "password": cfg["MQTT_PASSWORD"]}
-            mqtt_pub.single(
-                topic,
-                payload=payload,
+            msgs = [{"topic": f"{prefix}/{subtopic}", "payload": payload, "retain": True}]
+            for sub, val in (followup or []):
+                msgs.append({"topic": f"{prefix}/{sub}", "payload": str(val), "retain": False})
+            mqtt_pub.multiple(
+                msgs,
                 hostname=cfg["MQTT_BROKER"],
                 port=int(cfg["MQTT_PORT"]),
                 auth=auth,
-                retain=True,
             )
         except Exception:
             pass
