@@ -10,7 +10,7 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from shared.mqtt_stats import publish as mqtt_publish
+from shared.mqtt_stats import publish as mqtt_publish, publish_image as mqtt_publish_image
 from shared.status_bar import StatusBar
 from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
@@ -540,6 +540,15 @@ def _draw_confirm_dialog(screen, dlg_font, yes_rect: pygame.Rect, no_rect: pygam
                            rect.centery - lbl.get_height() // 2))
 
 
+def _do_save(canvas: "Canvas") -> str:
+    """Save canvas, publish MQTT stats and image. Returns the saved path."""
+    path = canvas.save()
+    mqtt_publish("paint/saved", os.path.basename(path))
+    mqtt_publish("paint/ts",    int(time.time()))
+    mqtt_publish_image("paint/image", path)
+    return path
+
+
 def main():
     single_instance("paint")
     pygame.init()
@@ -592,12 +601,20 @@ def main():
             if confirm_clear:
                 if event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_RETURN, pygame.K_y):
+                        if canvas.can_undo:
+                            _path        = _do_save(canvas)
+                            save_msg     = f"Saved → {_path}"
+                            save_msg_ttl = FPS * 4
                         canvas.clear()
                         confirm_clear = False
                     elif event.key in (pygame.K_ESCAPE, pygame.K_n):
                         confirm_clear = False
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if dlg_yes.collidepoint(event.pos):
+                        if canvas.can_undo:
+                            _path        = _do_save(canvas)
+                            save_msg     = f"Saved → {_path}"
+                            save_msg_ttl = FPS * 4
                         canvas.clear()
                     confirm_clear = False
                 dirty = True
@@ -617,22 +634,18 @@ def main():
                 elif event.key == pygame.K_y and (event.mod & pygame.KMOD_CTRL):
                     canvas.redo()
                 elif event.key == pygame.K_s:
-                    _path        = canvas.save()
+                    _path        = _do_save(canvas)
                     save_msg     = f"Saved → {_path}"
                     save_msg_ttl = FPS * 4
-                    mqtt_publish("paint/saved", os.path.basename(_path))
-                    mqtt_publish("paint/ts", int(time.time()))
 
             action = toolbar.handle_event(event)
             if action == "clear":
                 confirm_clear = True
                 dirty = True
             elif action == "save":
-                _path        = canvas.save()
+                _path        = _do_save(canvas)
                 save_msg     = f"Saved → {_path}"
                 save_msg_ttl = FPS * 4
-                mqtt_publish("paint/saved", os.path.basename(_path))
-                mqtt_publish("paint/ts", int(time.time()))
                 dirty = True
             elif action == "undo":
                 canvas.undo()
