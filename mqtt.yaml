@@ -8,10 +8,11 @@
 # other values (score, result) repeat across back-to-back games.
 
 mqtt:
-  camera:
+  image:
     - name: "qGames Paint Latest"
       unique_id: "qgames_paint_image"
-      topic: "qGames/paint/image"
+      image_topic: "qGames/paint/image"
+      content_type: "image/png"
 
   sensor:
 
