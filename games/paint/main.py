@@ -540,11 +540,26 @@ def _draw_confirm_dialog(screen, dlg_font, yes_rect: pygame.Rect, no_rect: pygam
                            rect.centery - lbl.get_height() // 2))
 
 
+def _make_thumb(surface: pygame.Surface, max_width: int = 800) -> str:
+    """Scale surface to max_width, save to a stable temp path, return path."""
+    w, h = surface.get_size()
+    if w > max_width:
+        h = int(h * max_width / w)
+        w = max_width
+        surface = pygame.transform.smoothscale(surface, (w, h))
+    folder = os.path.expanduser("~/Pictures/qGames")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "_mqtt_thumb.png")
+    pygame.image.save(surface, path)
+    return path
+
+
 def _do_save(canvas: "Canvas") -> str:
     """Save canvas, publish MQTT stats and image. Returns the saved path."""
     path = canvas.save()
     mqtt_publish("paint/saved", os.path.basename(path))
-    mqtt_publish_image("paint/image", path, followup=[("paint/ts", int(time.time()))])
+    thumb = _make_thumb(canvas.surface)
+    mqtt_publish_image("paint/image", thumb, followup=[("paint/ts", int(time.time()))])
     return path
 
 
