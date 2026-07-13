@@ -10,7 +10,8 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from shared.mqtt_stats import publish as mqtt_publish, publish_image as mqtt_publish_image
+from shared.diag import maybe_start as diag_maybe_start
+from shared.mqtt_stats import publish_image as mqtt_publish_image
 from shared.status_bar import StatusBar
 from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
@@ -557,14 +558,19 @@ def _make_thumb(surface: pygame.Surface, max_width: int = 800) -> str:
 def _do_save(canvas: "Canvas") -> str:
     """Save canvas, publish MQTT stats and image. Returns the saved path."""
     path = canvas.save()
-    mqtt_publish("paint/saved", os.path.basename(path))
     thumb = _make_thumb(canvas.surface)
-    mqtt_publish_image("paint/image", thumb, followup=[("paint/ts", int(time.time()))])
+    # One ordered connection: image first, then saved, then ts ("last played")
+    # LAST so the HA automation sees the updated image and filename.
+    mqtt_publish_image("paint/image", thumb, followup=[
+        ("paint/saved", os.path.basename(path)),
+        ("paint/ts", int(time.time())),
+    ])
     return path
 
 
 def main():
     single_instance("paint")
+    diag_maybe_start("paint")
     pygame.init()
 
     icon = pygame.image.load(resource_path("assets/icons/paint.png", GAME_DIR))

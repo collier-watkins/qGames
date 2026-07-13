@@ -9,7 +9,7 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from shared.mqtt_stats import publish as mqtt_publish
+from shared.mqtt_stats import publish_many as mqtt_publish_many
 from shared.status_bar import StatusBar
 from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
@@ -180,9 +180,14 @@ def main():
                 pending.append([flipped[0], flipped[1], MATCH_ANIM_TTL])
                 flipped.clear()
                 if matches == TOTAL_PAIRS:
-                    mqtt_publish("memory/moves", moves)
-                    mqtt_publish("memory/result", "win")
-                    mqtt_publish("memory/ts", int(time.time()))
+                    # ts ("last played") must be LAST so the HA automation it
+                    # triggers sees the updated moves/result. One connection,
+                    # ordered delivery.
+                    mqtt_publish_many([
+                        ("memory/moves", moves),
+                        ("memory/result", "win"),
+                        ("memory/ts", int(time.time())),
+                    ])
             else:
                 wait_ttl = FLIP_BACK_TTL
 

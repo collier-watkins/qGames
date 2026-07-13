@@ -10,7 +10,7 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from shared.mqtt_stats import publish as mqtt_publish
+from shared.mqtt_stats import publish_many as mqtt_publish_many
 from shared.status_bar import StatusBar
 from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
@@ -358,9 +358,13 @@ def main():
             if feedback_ttl == 0:
                 if q_num >= ROUND_SIZE:
                     state = "roundover"
-                    mqtt_publish("sequence/score", correct_total)
-                    mqtt_publish("sequence/total", q_num)
-                    mqtt_publish("sequence/ts",    int(time.time()))
+                    # ts ("last played") LAST so the HA automation sees the
+                    # updated score/total. One connection, ordered delivery.
+                    mqtt_publish_many([
+                        ("sequence/score", correct_total),
+                        ("sequence/total", q_num),
+                        ("sequence/ts",    int(time.time())),
+                    ])
                 else:
                     visible, answer, options, pattern = _new_question()
                     state        = "asking"

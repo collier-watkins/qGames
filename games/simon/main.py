@@ -10,7 +10,7 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from shared.mqtt_stats import publish as mqtt_publish
+from shared.mqtt_stats import publish_many as mqtt_publish_many
 from shared.status_bar import StatusBar
 from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
@@ -202,8 +202,12 @@ def main():
                             state       = "win_flash"
                     else:
                         fail_snd.play()
-                        mqtt_publish("simon/rounds", round_num - 1)
-                        mqtt_publish("simon/ts", int(time.time()))
+                        # ts ("last played") LAST so the HA automation sees the
+                        # updated rounds. One connection, ordered delivery.
+                        mqtt_publish_many([
+                            ("simon/rounds", round_num - 1),
+                            ("simon/ts", int(time.time())),
+                        ])
                         overlay_ttl = FAIL_WAIT
                         state       = "fail"
 

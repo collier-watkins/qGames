@@ -13,6 +13,19 @@ _DEFAULTS = {
     "MQTT_TOPIC_PREFIX": "qGames",
 }
 
+# Hard wall-clock bound on any single publish attempt. A broker that is down,
+# half-open (accepts TCP but never completes the MQTT handshake), or on a
+# blackholed network can otherwise leave a publish thread — and its open
+# socket/file-descriptor — hanging forever. Over days of saves that leaks FDs
+# and threads until the process (and the desktop) become unstable.
+_MQTT_TIMEOUT = 10.0  # seconds
+
+# Belt-and-suspenders: never let more than this many publish attempts be
+# in flight at once. Stats/images are non-critical, so if the broker is slow
+# enough to back them up we drop new ones rather than spawn unbounded threads.
+_MAX_INFLIGHT = 8
+_inflight = threading.BoundedSemaphore(_MAX_INFLIGHT)
+
 
 def _load_config() -> dict:
     cfg = dict(_DEFAULTS)
@@ -32,6 +45,70 @@ def _load_config() -> dict:
     return cfg
 
 
+def _send_bounded(cfg: dict, msgs: list) -> None:
+    """Connect, publish each {topic, payload, retain} in order, disconnect.
+
+    Every network wait is bounded by _MQTT_TIMEOUT and teardown runs in a
+    finally, so the thread and its socket are always released — even if the
+    broker is unreachable or never completes the handshake. Messages are sent
+    over one connection in list order.
+    """
+    client = None
+    try:
+        import paho.mqtt.client as mqtt
+
+        client = mqtt.Client()
+        if cfg["MQTT_USERNAME"]:
+            client.username_pw_set(cfg["MQTT_USERNAME"], cfg["MQTT_PASSWORD"])
+
+        connected = threading.Event()
+
+        def _on_connect(_client, _userdata, _flags, rc, *_):
+            if rc == 0:
+                connected.set()
+
+        client.on_connect = _on_connect
+        # Bound the TCP connect itself (paho attribute) as well as the handshake
+        # wait below, so neither phase can block indefinitely.
+        client._connect_timeout = _MQTT_TIMEOUT
+        client.connect_async(
+            cfg["MQTT_BROKER"], int(cfg["MQTT_PORT"]), keepalive=int(_MQTT_TIMEOUT)
+        )
+        client.loop_start()
+        try:
+            if connected.wait(_MQTT_TIMEOUT):
+                infos = [
+                    client.publish(m["topic"], m["payload"], retain=m["retain"])
+                    for m in msgs
+                ]
+                for info in infos:
+                    info.wait_for_publish(_MQTT_TIMEOUT)
+        finally:
+            client.loop_stop()
+            client.disconnect()
+    except Exception:
+        # Best effort: unconfigured, paho absent, or an unexpected paho API.
+        if client is not None:
+            try:
+                client.loop_stop()
+            except Exception:
+                pass
+
+
+def _dispatch(cfg: dict, msgs: list) -> None:
+    """Run _send_bounded in a daemon thread, capped at _MAX_INFLIGHT."""
+    if not _inflight.acquire(blocking=False):
+        return  # too many publishes already in flight — drop this one
+
+    def _run():
+        try:
+            _send_bounded(cfg, msgs)
+        finally:
+            _inflight.release()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def publish_image(subtopic: str, image_path: str, followup: list = None) -> None:
     """Publish a PNG as raw binary (retain=True), then any followup (subtopic, value) pairs.
 
@@ -42,29 +119,34 @@ def publish_image(subtopic: str, image_path: str, followup: list = None) -> None
     cfg = _load_config()
     if not cfg["MQTT_BROKER"]:
         return
+    try:
+        with open(image_path, "rb") as f:
+            payload = f.read()
+    except OSError:
+        return
+    prefix = cfg["MQTT_TOPIC_PREFIX"]
+    msgs = [{"topic": f"{prefix}/{subtopic}", "payload": payload, "retain": True}]
+    for sub, val in (followup or []):
+        msgs.append({"topic": f"{prefix}/{sub}", "payload": str(val), "retain": False})
+    _dispatch(cfg, msgs)
 
-    def _send():
-        try:
-            import paho.mqtt.publish as mqtt_pub
-            with open(image_path, "rb") as f:
-                payload = f.read()
-            prefix = cfg["MQTT_TOPIC_PREFIX"]
-            auth   = None
-            if cfg["MQTT_USERNAME"]:
-                auth = {"username": cfg["MQTT_USERNAME"], "password": cfg["MQTT_PASSWORD"]}
-            msgs = [{"topic": f"{prefix}/{subtopic}", "payload": payload, "retain": True}]
-            for sub, val in (followup or []):
-                msgs.append({"topic": f"{prefix}/{sub}", "payload": str(val), "retain": False})
-            mqtt_pub.multiple(
-                msgs,
-                hostname=cfg["MQTT_BROKER"],
-                port=int(cfg["MQTT_PORT"]),
-                auth=auth,
-            )
-        except Exception:
-            pass
 
-    threading.Thread(target=_send, daemon=True).start()
+def publish_many(pairs: list) -> None:
+    """Fire-and-forget publish of several (subtopic, value) pairs in one connection.
+
+    All messages go out over a single connection in list order. Put any topic
+    that triggers a Home Assistant automation LAST, so the automation sees
+    fully-updated data. Silent no-op if unconfigured or paho absent.
+    """
+    cfg = _load_config()
+    if not cfg["MQTT_BROKER"]:
+        return
+    prefix = cfg["MQTT_TOPIC_PREFIX"]
+    msgs = [
+        {"topic": f"{prefix}/{sub}", "payload": str(val), "retain": False}
+        for sub, val in pairs
+    ]
+    _dispatch(cfg, msgs)
 
 
 def publish(subtopic: str, value) -> None:
@@ -72,23 +154,5 @@ def publish(subtopic: str, value) -> None:
     cfg = _load_config()
     if not cfg["MQTT_BROKER"]:
         return
-
-    def _send():
-        try:
-            import paho.mqtt.publish as mqtt_pub
-            topic = f"{cfg['MQTT_TOPIC_PREFIX']}/{subtopic}"
-            auth = None
-            if cfg["MQTT_USERNAME"]:
-                auth = {"username": cfg["MQTT_USERNAME"], "password": cfg["MQTT_PASSWORD"]}
-            mqtt_pub.single(
-                topic,
-                payload=str(value),
-                hostname=cfg["MQTT_BROKER"],
-                port=int(cfg["MQTT_PORT"]),
-                auth=auth,
-                retain=False,
-            )
-        except Exception:
-            pass
-
-    threading.Thread(target=_send, daemon=True).start()
+    topic = f"{cfg['MQTT_TOPIC_PREFIX']}/{subtopic}"
+    _dispatch(cfg, [{"topic": topic, "payload": str(value), "retain": False}])

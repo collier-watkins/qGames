@@ -9,7 +9,7 @@ import pygame
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-from shared.mqtt_stats import publish as mqtt_publish
+from shared.mqtt_stats import publish_many as mqtt_publish_many
 from shared.status_bar import StatusBar
 from shared.util import draw_splash, maximize_window, resource_path, single_instance
 
@@ -680,9 +680,13 @@ def main():
                                     log.append(
                                         ("ALL ENEMY SHIPS DESTROYED — YOU WIN!  Press R to play again.",
                                          C_LOG_GOOD))
-                                    mqtt_publish("battleship/result", "win")
-                                    mqtt_publish("battleship/shots", len(ai_board.shots))
-                                    mqtt_publish("battleship/ts", int(time.time()))
+                                    # ts ("last played") LAST so the HA automation
+                                    # sees updated result/shots. Ordered delivery.
+                                    mqtt_publish_many([
+                                        ("battleship/result", "win"),
+                                        ("battleship/shots", len(ai_board.shots)),
+                                        ("battleship/ts", int(time.time())),
+                                    ])
                                 else:
                                     state    = STATE_AI
                                     ai_timer = AI_DELAY
@@ -711,9 +715,13 @@ def main():
                     winner = "ai"
                     log.append(
                         ("ALL YOUR SHIPS SUNK — GAME OVER.  Press R to play again.", C_LOG_BAD))
-                    mqtt_publish("battleship/result", "loss")
-                    mqtt_publish("battleship/shots", len(ai_board.shots))
-                    mqtt_publish("battleship/ts", int(time.time()))
+                    # ts ("last played") LAST so the HA automation sees updated
+                    # result/shots. One connection, ordered delivery.
+                    mqtt_publish_many([
+                        ("battleship/result", "loss"),
+                        ("battleship/shots", len(ai_board.shots)),
+                        ("battleship/ts", int(time.time())),
+                    ])
                 else:
                     state = STATE_PLAYER
 
