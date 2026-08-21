@@ -20,7 +20,7 @@ GAMES_LIST  = $(if $(GAMES),$(GAMES),(none found under games/*/project.godot))
 .DEFAULT_GOAL := help
 
 .PHONY: help _check-game import run test test-all export-linux export-arm64 export-all \
-        dist dist-tar deploy install uninstall bake bake-clean version new-game clean
+        dist dist-tar deploy install uninstall bake bake-clean version release new-game clean
 
 help:
 >@echo "qGames2 — available targets:"
@@ -77,6 +77,11 @@ VERSION = $(shell tools/version.sh)
 
 version:
 >@tools/version.sh
+
+# Cut a version tag: make release BUMP=patch|minor|major
+release:
+>@test -n "$(BUMP)" || { echo "error: BUMP is required, e.g. make release BUMP=minor" >&2; exit 1; }
+>@tools/release.sh "$(BUMP)"
 
 # Write games/*/build_config.cfg — the settings that ride INSIDE the export.
 bake:

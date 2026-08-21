@@ -147,12 +147,37 @@ func _now() -> float:
 	return float(Time.get_ticks_msec() - _started_msec) / 1000.0
 
 
+## The HUD listens on _input rather than _unhandled_input, so it sees keys
+## before any Control can swallow them — a game with a focused text field
+## cannot eat the debug toggle.
+##
+## Ctrl+Shift+letter is the primary binding. Function keys are kept as a second
+## way in, but they cannot be the only way: half the compact keyboards in the
+## house need Fn held to reach F3 at all, and some have no F row.
+##
+## Shift is part of every combination on purpose. Games bind plain Ctrl+letter
+## freely and mostly do not check shift, so Ctrl+Shift keeps this out of their
+## way — and the letters below (D, W, M) are not bound by any game regardless.
 func _input(event: InputEvent) -> void:
 	if not _enabled:
 		return
 	var handled: bool = false
 	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
+		var key: InputEventKey = event
+		var combo: bool = (key.ctrl_pressed or key.meta_pressed) and key.shift_pressed
+		match key.keycode:
+			KEY_D:
+				if combo:
+					cycle()
+					handled = true
+			KEY_W:
+				if combo:
+					toggle_window()
+					handled = true
+			KEY_M:
+				if combo:
+					reset_baseline()
+					handled = true
 			KEY_F3:
 				cycle()
 				handled = true
@@ -182,6 +207,7 @@ func _build_ui() -> void:
 	if _font != null:
 		_chip.add_theme_font_override("font", _font)
 	_chip.add_theme_color_override("font_color", Color(COL_TEXT))
+	_chip.tooltip_text = "Debug readout — Ctrl+Shift+D (or F3)"
 	_chip.add_theme_color_override("font_hover_color", Color(COL_OK))
 	for s in ["normal", "hover", "pressed", "focus", "disabled"]:
 		_chip.add_theme_stylebox_override(s, _box(Color(0.0, 0.0, 0.0, 0.55)))
@@ -333,8 +359,22 @@ func _mqtt_stats() -> Dictionary:
 	return t.io_stats()
 
 
+## Which build this is. The first thing to establish about a bug report is
+## which version produced it, so it leads the readout rather than hiding in a
+## corner of the full view.
+func _build_label() -> String:
+	var version: String = str(QConfig.get_value("build/version", "0.0.0-dev"))
+	# A dev build says so plainly. "+g<sha>" build metadata is noise in the
+	# compact line; the full view still shows it.
+	var short: String = version.split("+")[0]
+	if version.begins_with("0.0.0"):
+		return "dev"
+	return "v" + short
+
+
 func _compact() -> String:
 	var parts: PackedStringArray = PackedStringArray()
+	parts.append(_c(_build_label(), COL_DIM))
 	parts.append(_c("%.0f fps" % stats.fps, _lvl_col(stats.fps_level(TARGET_FPS))))
 	parts.append("%.1fms" % stats.frame_ms)
 	if stats.cpu_pct >= 0.0:
@@ -350,6 +390,16 @@ func _compact() -> String:
 
 func _full(m: Dictionary) -> String:
 	var out: PackedStringArray = PackedStringArray()
+	# Full version including the +build metadata, plus the commit it came from
+	# — between them they identify an artefact exactly.
+	var version: String = str(QConfig.get_value("build/version", "0.0.0-dev"))
+	var commit: String = str(QConfig.get_value("build/commit", ""))
+	var built: String = str(QConfig.get_value("build/built_at", ""))
+	var game: String = str(ProjectSettings.get_setting("application/config/name", "?"))
+	out.append(_row("BUILD", "%s  %s%s" % [
+		_c(game, COL_TEXT), _c(version, COL_DIM),
+		_c("   %s" % built, COL_DIM) if built != "" else "",
+	]))
 	out.append(_row("FPS", "%s  min %s   frame %.2f ms  worst %.1f ms" % [
 		_c("%5.1f" % stats.fps, _lvl_col(stats.fps_level(TARGET_FPS))),
 		"%.0f" % stats.min_fps if stats.min_fps > 0.0 else "-",
@@ -380,7 +430,8 @@ func _full(m: Dictionary) -> String:
 	out.append_array(_mqtt_rows(m))
 	for k in _notes.keys():
 		out.append(_row(str(k).to_upper().substr(0, 4), str(_notes[k])))
-	out.append(_c("F3 mode · F4 window · F5 reset · up %s" % _dur(stats.uptime_sec), COL_DIM))
+	out.append(_c("Ctrl+Shift  D mode · W window · M reset   (F3/F4/F5 too)   up %s"
+			% _dur(stats.uptime_sec), COL_DIM))
 	return "\n".join(out)
 
 

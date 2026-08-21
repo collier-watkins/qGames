@@ -636,6 +636,24 @@ build does, with no per-device setup. What is still missing is unchanged — JDK
 17, the Android SDK, and an export preset. `install.sh` is Linux-only by nature;
 Android installs through the APK.
 
+## Turning the debug readout on
+
+**Ctrl+Shift+D** cycles it off / compact / full. **Ctrl+Shift+W** pops it into
+its own window, **Ctrl+Shift+M** re-baselines the memory slope. F3/F4/F5 still
+work, and the "dbg" chip in the corner is the touch path.
+
+Ctrl+Shift+letter is the primary binding because function keys cannot be the
+only way in: half the compact keyboards in the house need Fn held to reach F3,
+and some have no F row at all. Shift is part of every combination on purpose —
+games bind plain Ctrl+letter freely and mostly do not check shift — and D, W
+and M are bound by no game regardless. The HUD listens on `_input`, so it sees
+keys before any Control and a focused text field cannot swallow the toggle.
+
+**The readout leads with the build.** Compact shows `v0.1.0` (or `dev`); full
+shows the game name, the full version including build metadata, and when it was
+built. The first thing to establish about a bug report is which version produced
+it, so it goes first rather than hiding in a corner.
+
 ## Reading size (Ctrl +/-/0)
 
 **Every game can be scaled at runtime, platform-wide** (2026-08-21). Ctrl and
