@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Felt ground, matching the table in-game. -->
+  <rect width="256" height="256" rx="40" fill="#1e3a34"/>
+  <!-- A 6-3 bone standing upright, the way a double lies across a line.
+       Each half's pips stay clear of the divider at y=128. -->
+  <rect x="74" y="26" width="108" height="204" rx="18" fill="#f5f0e3" stroke="#cfc7b4" stroke-width="4"/>
+  <line x1="88" y1="128" x2="168" y2="128" stroke="#cfc7b4" stroke-width="5" stroke-linecap="round"/>
+  <g fill="#232a2e">
+    <!-- six: two columns of three, spanning 40..114 -->
+    <circle cx="103" cy="50"  r="10"/><circle cx="153" cy="50"  r="10"/>
+    <circle cx="103" cy="78"  r="10"/><circle cx="153" cy="78"  r="10"/>
+    <circle cx="103" cy="106" r="10"/><circle cx="153" cy="106" r="10"/>
+  </g>
+  <g fill="#232a2e">
+    <!-- three: a diagonal, spanning 142..216 -->
+    <circle cx="103" cy="152" r="10"/>
+    <circle cx="128" cy="179" r="10"/>
+    <circle cx="153" cy="206" r="10"/>
+  </g>
+</svg>

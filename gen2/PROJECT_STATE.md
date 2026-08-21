@@ -177,6 +177,94 @@ games of different shapes, keypad-plus-touch works on all three, GDScript suits
 the work, and the Linux x86_64 and arm64 exports come out clean. **Android is
 still unanswered** — the SDK is not installed, so no APK has ever been built.
 
+**Fourth game: `dominoes`** — now a clone of the New York Times' **Pips**
+(rebuilt 2026-08-21, replacing the chain game built earlier the same day).
+
+**The rules were looked up, not remembered.** The first version was a
+traditional matching-chain game; that is not what Pips is. Pips is a constraint
+placement puzzle, and the single most important rule is the one that inverts
+the earlier game: **touching ends do NOT have to match.** Only region rules
+matter, and a domino may straddle two regions with each half answering to its
+own. Sources disagreed on one point — whether `<`/`>` bound each half or the
+region SUM — so it was settled against two independent solver implementations
+rather than a how-to article: they bound the **sum**.
+
+The rule set, as implemented and tested:
+
+| symbol | meaning |
+|--------|---------|
+| a number | the region's pips must total exactly that |
+| `=` | every half in the region shows the same value |
+| `≠` | every half shows a different value |
+| `<n` / `>n` | the region's TOTAL is under / over n |
+| blank | no rule |
+
+- `src/puzzle.gd` — board, regions, tray, placement. Every rule is evaluated on
+  PARTIAL boards, and reports VIOLATED as soon as it **cannot come good** — a
+  sum already overshot, a target no longer reachable even with sixes
+  everywhere, two different pips under `=`. A player has to be told they have
+  broken a region when they break it, not at the end.
+- `src/solver.gd` — backtracking, used for three things: keeping generated
+  puzzles from having many answers, powering a hint, and **proving in the tests
+  that a puzzle is solvable without trusting the generator**.
+- `src/generator.gd` — builds backwards, which is the only reliable way: tile
+  the board, deal real bones onto the tiling, then write rules chosen from
+  those the finished arrangement already satisfies. The solution exists before
+  the puzzle does, so a generated board cannot be impossible.
+- `src/library.gd` — reads the shipped pack.
+
+**Uniqueness had to be engineered, twice over.** A freshly generated board
+almost never happens to have one answer, because the domino TILING is free even
+when every sum is right — 0/20 unique at medium and hard. Rerolling and hoping
+does not converge, so puzzles are **repaired instead**: find two answers, find a
+cell they disagree about, and tighten that cell's region — a loose rule becomes
+an exact sum, an exact sum splits off the cell as a region of its own. Each
+round pins at least one more cell, so it terminates.
+
+That only started working after a real bug was fixed: the solver was counting
+PLACEMENTS, but two tilings can leave every cell showing the same number. To
+anyone reasoning about the rules those are one answer, and counting them
+separately sent the generator chasing a difference that did not exist. Answers
+are now deduplicated by their grid of values, after which uniqueness converged
+at every level.
+
+**Puzzles are generated offline and shipped.** Proving a hard board has exactly
+one answer measured **~12 seconds** on this laptop, and a Pi is several times
+slower again — nobody taps "new puzzle" and waits half a minute.
+`tools_gen_puzzles.gd` builds the pack once, verifies every entry is solvable
+AND unique before writing it, and the result is committed as
+`games/dominoes/puzzles.json`. The game only reads it, and falls back to live
+generation if the pack is missing — slower and not guaranteed unique, but a
+game that still starts beats a blank screen. `puzzles.json` had to be named in
+the export `include_filter`: it is a plain file, not an imported resource, so
+`export_filter="all_resources"` would leave it out.
+
+**Interface**, following Pips: a light, papery page rather than the suite's
+usual dark; flat pastel regions with the rule printed once in the corner of the
+region's top-left cell; the tray of remaining dominoes beneath the board;
+Easy/Medium/Hard. A region tints green when satisfied and red when broken, so
+the board answers "is this bit right?" without the player redoing the
+arithmetic. Region colours are assigned by greedy graph colouring so two
+touching regions can never come out the same shade — otherwise the palette
+repeats at random and hides the very boundary being read. Rules are drawn ON
+TOP of the dominoes: a covered region still has to say what it wants.
+
+**Interaction is tap–tap, not drag.** Pips drags; a drag is fiddly with a finger
+on a small board and impossible with a d-pad, and this platform treats touch and
+keypad as equally first-class. Pick a domino, turn it (R, or tap it again), tap
+where it goes; tap a placed domino to take it back. Turning cycles four ways,
+not two, because a 3-5 laid left-to-right is a different placement from a 5-3.
+A ghost shows what the tap will do — green when it fits, red when it does not —
+so the answer is visible before the tap rather than after it.
+
+58 model tests, plus `tests/interactive.gd`, which drives the real game with
+real mouse and key events and is not in `make test-all` because it needs a
+display. Every puzzle in the shipped pack is verified solvable by the tests; a
+sample is verified unique, since proving it exhausts the search.
+
+MQTT: `score` is the number of dominoes in the solved puzzle, with `moves` and
+`level` alongside.
+
 **Third game, new: `notes`** (2026-08-20, rewritten as a WYSIWYG editor
 2026-08-21). A small Markdown word processor. Not a port; nothing like it
 existed in the old suite. Files live in `user://notes/*.md`, so app-private

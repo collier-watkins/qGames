@@ -96,6 +96,45 @@ mqtt:
       device_class: duration
       icon: "mdi:timer-outline"
 
+    # ── Dominoes / Pips (constraint placement puzzle) ────────────────────────
+    # score is the number of dominoes in the solved puzzle, which is its size.
+    - name: "qGames Pips Last Solved"
+      unique_id: "qgames2_dominoes_ts"
+      state_topic: "qGames/dominoes/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "qGames Pips Result"
+      unique_id: "qgames2_dominoes_result"
+      state_topic: "qGames/dominoes/result"
+      icon: "mdi:puzzle"
+
+    - name: "qGames Pips Dominoes Placed"
+      unique_id: "qgames2_dominoes_score"
+      state_topic: "qGames/dominoes/score"
+      unit_of_measurement: "dominoes"
+      state_class: measurement
+      icon: "mdi:domino-mask"
+
+    - name: "qGames Pips Difficulty"
+      unique_id: "qgames2_dominoes_level"
+      state_topic: "qGames/dominoes/level"
+      icon: "mdi:signal-cellular-2"
+
+    - name: "qGames Pips Moves"
+      unique_id: "qgames2_dominoes_moves"
+      state_topic: "qGames/dominoes/moves"
+      state_class: measurement
+      icon: "mdi:gesture-tap"
+
+    - name: "qGames Pips Duration"
+      unique_id: "qgames2_dominoes_duration"
+      state_topic: "qGames/dominoes/duration_s"
+      unit_of_measurement: "s"
+      device_class: duration
+      state_class: measurement
+      icon: "mdi:timer-outline"
+
     # ── Notes (Markdown word processor) ──────────────────────────────────────
     # A "round" here is a save. score is the word count, which is the number a
     # writer recognises; chars rides along as a game-specific topic.
