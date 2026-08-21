@@ -15,3 +15,7 @@ dist/
 # Editor / OS junk.
 *.tmp
 .DS_Store
+
+# Generated at export time by tools/bake_config.sh. Contains broker
+# credentials in a baked build — must never be committed.
+games/*/build_config.cfg

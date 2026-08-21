@@ -2,7 +2,14 @@ extends Node
 
 ## Layered per-environment config. Autoload as "QConfig".
 ##
-##   baked defaults  <  user://config.cfg  <  QGAMES_* environment variables
+##   baked defaults  <  res://build_config.cfg  <  user://config.cfg  <  env
+##
+## res://build_config.cfg is written at EXPORT time by tools/bake_config.sh and
+## travels inside the .pck. It is what lets a shipped game reach the broker with
+## no environment set up on the target machine at all — which matters on Android,
+## where there is no shell to export a variable from, and on a desktop launcher,
+## which does not inherit your shell environment either. It is absent in a
+## source checkout, and its absence is harmless.
 ##
 ## user:// resolves to app-private storage on Android and
 ## ~/.local/share/godot/app_userdata/<project> on Linux, so one code path
@@ -10,6 +17,10 @@ extends Node
 ## not meaningfully expose them.
 
 const CONFIG_PATH := "user://config.cfg"
+
+## Written into the export by tools/bake_config.sh; never in the repository.
+## HOLDS CREDENTIALS in a shipped build — see that script's header.
+const BUILD_CONFIG_PATH := "res://build_config.cfg"
 
 const DEFAULTS := {
 	# MQTT is ON by default. The broker and credentials are NOT baked in — they
@@ -40,6 +51,11 @@ const DEFAULTS := {
 	"debug/hud_stdout": false,           # also print one line/sec — headless, CI, ssh
 	# Per-app appearance. Games ignore it; the notes editor reads it.
 	"ui/theme": "light",
+	# Stamped into the export by tools/bake_config.sh. A source checkout keeps
+	# these defaults, which is how you tell a dev run from a shipped build.
+	"build/version": "0.0.0-dev",
+	"build/commit": "",
+	"build/built_at": "",
 }
 
 ## MQTT settings also answer to their bare names, so one exported environment
@@ -68,12 +84,8 @@ func _ready() -> void:
 
 func reload() -> void:
 	_values = DEFAULTS.duplicate(true)
-
-	var cf := ConfigFile.new()
-	if cf.load(CONFIG_PATH) == OK:
-		for section in cf.get_sections():
-			for key in cf.get_section_keys(section):
-				_values["%s/%s" % [section, key]] = cf.get_value(section, key)
+	_merge_file(BUILD_CONFIG_PATH)
+	_merge_file(CONFIG_PATH)
 
 	for key in BARE_ENV.keys():
 		var bare: String = str(BARE_ENV[key])
@@ -84,6 +96,32 @@ func reload() -> void:
 		var env_name: String = "QGAMES_" + String(key).replace("/", "_").to_upper()
 		if OS.has_environment(env_name):
 			_values[key] = _coerce(OS.get_environment(env_name), _values[key])
+
+
+## Overlay one ConfigFile onto the current values. A missing file is normal:
+## the baked one only exists in an export, and the user one only after someone
+## has changed a setting.
+func _merge_file(path: String) -> void:
+	var cf := ConfigFile.new()
+	if cf.load(path) != OK:
+		return
+	for section in cf.get_sections():
+		for key in cf.get_section_keys(section):
+			_values["%s/%s" % [section, key]] = cf.get_value(section, key)
+
+
+## Version of the running build: a semver from git tags, or "0.0.0-dev" in a
+## source checkout that has never been exported.
+func version() -> String:
+	return str(get_value("build/version", "0.0.0-dev"))
+
+
+func build_info() -> Dictionary:
+	return {
+		"version": version(),
+		"commit": str(get_value("build/commit", "")),
+		"built_at": str(get_value("build/built_at", "")),
+	}
 
 
 func get_value(key: String, fallback = null):

@@ -6,6 +6,7 @@ extends SceneTree
 
 const MemoryBoard := preload("res://src/board.gd")
 const QMqttClientT := preload("res://addons/qcore/mqtt_client.gd")
+const QConfigT := preload("res://addons/qcore/config.gd")
 
 var _pass: int = 0
 var _fail: int = 0
@@ -31,6 +32,9 @@ func _initialize() -> void:
 	_test_mqtt_queue()
 	_test_mqtt_large_payload()
 	_test_body_truncation_is_utf8_safe()
+	_test_config_layering()
+	_test_config_defaults()
+	_test_config_writes_only_what_it_was_given()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -375,15 +379,90 @@ func _test_mqtt_large_payload() -> void:
 
 
 ## A body over the cap is truncated rather than handed to the broker whole, and
-## truncation must not split a multi-byte character in half.
+## the cut must not land inside a character. A byte limit knows nothing about
+## characters, so cutting a 4-byte emoji after two bytes would publish an
+## incomplete sequence — a replacement character on the wire, and a warning in
+## the log on the way out.
 func _test_body_truncation_is_utf8_safe() -> void:
 	var emoji: String = "🙂"
-	_check_eq("the test character really is multi-byte",
+	_check_eq("the test character really is four bytes",
 			emoji.to_utf8_buffer().size(), 4)
-	var buf: PackedByteArray = (emoji.repeat(100)).to_utf8_buffer()
-	# Slice at a boundary that lands mid-character, the way a byte cap would.
-	var cut: PackedByteArray = buf.slice(0, 102)
-	var back: String = cut.get_string_from_utf8()
-	_check("a mid-character cut does not produce a longer string than the input",
-			back.length() <= 100)
+
+	var buf: PackedByteArray = emoji.repeat(50).to_utf8_buffer()
+	# 102 lands two bytes into the 26th character — the worst case.
+	var cut: int = QTelemetrySchema.utf8_boundary(buf, 102)
+	_check_eq("the cut is pulled back to a character boundary", cut, 100)
+	_check_eq("so the truncated text holds whole characters only",
+			buf.slice(0, cut).get_string_from_utf8(), emoji.repeat(25))
+	_check("and no replacement character is produced",
+			not buf.slice(0, cut).get_string_from_utf8().contains("�"))
+
+	# A cut already on a boundary must not move, and ASCII is never affected.
+	_check_eq("a cut already on a boundary stays put",
+			QTelemetrySchema.utf8_boundary(buf, 100), 100)
+	_check_eq("plain ASCII cuts anywhere",
+			QTelemetrySchema.utf8_boundary("abcdefgh".to_utf8_buffer(), 3), 3)
+	_check_eq("a limit past the end clamps to the end",
+			QTelemetrySchema.utf8_boundary("abc".to_utf8_buffer(), 999), 3)
+
+
+# ── qcore: layered config (shared/qcore/config.gd) ──────────────────────────
+
+
+## config.gd is preloadable — unlike telemetry.gd it names no autoload — so the
+## layering can be exercised directly rather than inferred from a running game.
+func _test_config_layering() -> void:
+	var cfg = QConfigT.new()
+
+	# A missing file at any layer is normal, not an error: the baked config only
+	# exists in an export, and the user file only after a setting is changed.
+	cfg._values = {"mqtt/broker": "", "build/version": "0.0.0-dev"}
+	cfg._merge_file("user://definitely_not_here.cfg")
+	_check_eq("a missing config file leaves values untouched",
+			cfg._values["mqtt/broker"], "")
+
+	# A later layer overlays an earlier one, key by key, leaving the rest alone.
+	var tmp := "user://_layertest.cfg"
+	var f := ConfigFile.new()
+	f.set_value("mqtt", "broker", "10.0.0.9")
+	f.set_value("build", "version", "1.2.3")
+	_check("the fixture wrote", f.save(tmp) == OK)
+	cfg._merge_file(tmp)
+	_check_eq("a merged file overrides the value it names",
+			cfg._values["mqtt/broker"], "10.0.0.9")
+	_check_eq("and every key it names", cfg._values["build/version"], "1.2.3")
+
+	# Keys the file does not mention survive.
+	cfg._values["mqtt/port"] = 1883
+	cfg._merge_file(tmp)
+	_check_eq("keys the file does not mention are left alone",
+			cfg._values["mqtt/port"], 1883)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(tmp))
+	cfg.free()
+
+
+func _test_config_defaults() -> void:
+	_check_eq("MQTT is on by default", QConfigT.DEFAULTS["mqtt/enabled"], true)
+	_check_eq("but no broker is baked into the repo",
+			QConfigT.DEFAULTS["mqtt/broker"], "")
+	_check_eq("a source checkout reports itself as a dev build",
+			QConfigT.DEFAULTS["build/version"], "0.0.0-dev")
+	# The bare-name env fallback is what lets one exported environment serve
+	# every game without a QGAMES_ prefix on each line.
+	_check_eq("the bare env name for the broker",
+			QConfigT.BARE_ENV["mqtt/broker"], "MQTT_BROKER")
+
+
+## set_value/save must write ONLY what it was given. Writing the whole value set
+## would copy the MQTT password out of the environment onto disk.
+func _test_config_writes_only_what_it_was_given() -> void:
+	var cfg = QConfigT.new()
+	cfg._values = {"ui/theme": "light", "mqtt/password": "hunter2"}
+	cfg._written = {}
+	cfg.set_value("ui/theme", "dark")
+	_check_eq("set_value records the key", cfg._written.has("ui/theme"), true)
+	_check_eq("and nothing else", cfg._written.size(), 1)
+	_check("a password read from the environment is not queued for writing",
+			not cfg._written.has("mqtt/password"))
+	cfg.free()
 

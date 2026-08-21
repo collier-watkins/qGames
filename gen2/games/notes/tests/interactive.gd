@@ -65,6 +65,14 @@ func _process(_delta: float) -> bool:
 	match _n:
 		4:
 			_rich = _game._rich
+			# The app opens like a word processor: a blank, unsaved page. It
+			# must not seed sample text, and must not adopt whatever note
+			# happens to sort first in the notes directory.
+			_ck("startup opens a document that was never saved",
+					_game._doc.is_new(), true)
+			_ck("startup opens an empty document", _game._doc.text, "")
+			_ck("a brand-new document is not dirty", _game._doc.dirty, false)
+			_ck("the title bar calls it Untitled", _game._doc.title(), "Untitled")
 			_game._doc.set_text("# Title\n\nplain")
 			_game._push_document()
 			_rich.grab_focus()

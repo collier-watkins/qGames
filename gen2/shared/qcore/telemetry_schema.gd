@@ -65,3 +65,27 @@ static func build_result_pairs(result: String, score: int, score_unit: String,
 	]
 	pairs.append_array(extra)
 	return pairs
+
+
+## The largest cut at or below `limit` that does not land inside a character.
+##
+## Lives here rather than in telemetry.gd for the same reason the rest of this
+## file does: telemetry.gd names the QConfig autoload, and an autoload
+## identifier is not in scope while a preload chain compiles under `--script`,
+## so the whole file fails to compile and its statics silently vanish. A pure
+## function that needs testing has to live somewhere testable.
+##
+## A byte limit knows nothing about characters: cutting a 4-byte emoji after two
+## bytes yields an incomplete sequence, which decodes to a replacement character
+## and complains on the way. UTF-8 continuation bytes are 10xxxxxx, so walking
+## back to the first byte that is not one lands on a character start.
+static func utf8_boundary(buf: PackedByteArray, limit: int) -> int:
+	var cut: int = mini(limit, buf.size())
+	# Nothing is being cut off, so nothing can be cut in half — and buf[cut]
+	# would be one past the end.
+	if cut >= buf.size():
+		return buf.size()
+	while cut > 0 and (buf[cut] & 0xC0) == 0x80:
+		cut -= 1
+	return cut
+

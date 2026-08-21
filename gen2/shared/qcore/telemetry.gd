@@ -106,7 +106,9 @@ func _publish_retained(pairs: Array) -> void:
 			if utf8.size() > MAX_BODY_BYTES:
 				push_warning("[telemetry] %s truncated: %d bytes over the %d limit"
 						% [pair[0], utf8.size() - MAX_BODY_BYTES, MAX_BODY_BYTES])
-				value = utf8.slice(0, MAX_BODY_BYTES).get_string_from_utf8()
+				value = utf8.slice(0, QTelemetrySchema.utf8_boundary(
+						utf8, MAX_BODY_BYTES)) \
+						.get_string_from_utf8()
 		_client.enqueue("%s/%s/%s" % [prefix, game_name, pair[0]], value, true)
 
 

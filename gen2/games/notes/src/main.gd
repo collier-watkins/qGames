@@ -86,38 +86,6 @@ const DEFAULT_THEME: String = "light"
 ## you need to see. It is hidden until asked for.
 enum View { RICH, SOURCE, SPLIT }
 
-## Shown once, in memory only, when the notes directory is empty. Doubles as a
-## syntax cheat sheet and as the thing a first screenshot has to render.
-const WELCOME: String = """# Welcome to Notes
-
-A small **Markdown** word processor. You are typing in the *rendered* text —
-the bold below really is bold while you edit it, not a preview of it.
-
-## What it understands
-
-- headings, `#` through `######`
-- **bold**, *italic*, `inline code`
-- lists, ordered and not
-- > blockquotes
-- [links](https://example.com)
-
-1. write
-2. save
-3. forget about it
-
-```
-fenced code stays literal: **not bold**, [b]not a tag[/b]
-```
-
----
-
-The markers are still there, just not shown: the caret steps over `**` rather
-than into it, and backspace at the start of a line takes its `#` or `- ` off.
-
-Press *Rich* to show the raw Markdown, and again for both side by side.
-Press *Files* to open another note. Escape leaves the editor; Escape again quits.
-"""
-
 var _doc: QNoteDocument
 var _store: QNoteStore
 
@@ -188,14 +156,9 @@ func _game_ready() -> void:
 	resized.connect(_on_resized)
 	QInput.device_changed.connect(_on_device_changed)
 
-	var existing: PackedStringArray = _store.list()
-	if existing.is_empty():
-		# Assigned directly, not through set_text(): a first-run sample the
-		# user has not touched must not start life dirty.
-		_doc.text = WELCOME
-	else:
-		_open_file(existing[0])
-
+	# Opens on the empty, unsaved document QNoteDocument.new() already made:
+	# a word processor starts on a blank page, not on whatever it found on
+	# disk. Saved notes are one Files press away.
 	_push_document()
 	_apply_view()
 	_refresh_chrome()
@@ -345,6 +308,9 @@ class RibbonButton extends Button:
 	var ink_active: Color = Color(0.9412, 0.7843, 0.1961)
 	var letter_font: Font
 
+	# Diagonals and curves are drawn antialiased. Without it, at 32x32 the sun's
+	# rays break into detached squares and the arcs step visibly; the straight
+	# horizontal rules in the list icons look the same either way.
 	func _draw() -> void:
 		var c: Color = ink_active if button_pressed else ink
 		if disabled:
@@ -373,7 +339,7 @@ class RibbonButton extends Button:
 				var serif: float = 3.3
 				var top := Vector2(cx + lean, cy - half)
 				var bottom := Vector2(cx - lean, cy + half)
-				draw_line(top, bottom, c, 1.9)
+				draw_line(top, bottom, c, 1.9, true)
 				draw_line(top + Vector2(-serif, 0), top + Vector2(serif, 0), c, 1.9)
 				draw_line(bottom + Vector2(-serif, 0), bottom + Vector2(serif, 0), c, 1.9)
 			"bullet", "number":
@@ -402,22 +368,48 @@ class RibbonButton extends Button:
 				var mid: float = o.y + box * 0.5
 				draw_polyline([Vector2(o.x + 6.5, o.y + 2.0),
 						Vector2(o.x + 1.0, mid),
-						Vector2(o.x + 6.5, o.y + box - 2.0)], c, 1.8)
+						Vector2(o.x + 6.5, o.y + box - 2.0)], c, 1.8, true)
 				draw_polyline([Vector2(o.x + box - 6.5, o.y + 2.0),
 						Vector2(o.x + box - 1.0, mid),
-						Vector2(o.x + box - 6.5, o.y + box - 2.0)], c, 1.8)
+						Vector2(o.x + box - 6.5, o.y + box - 2.0)], c, 1.8, true)
 			"sun":
 				var ctr: Vector2 = size * 0.5
-				draw_circle(ctr, 4.2, c)
+				draw_circle(ctr, 4.2, c, true)
 				for i in 8:
 					var a: float = TAU * float(i) / 8.0
 					var dir := Vector2(cos(a), sin(a))
-					draw_line(ctr + dir * 6.2, ctr + dir * 8.4, c, 1.6)
+					draw_line(ctr + dir * 6.2, ctr + dir * 8.4, c, 1.6, true)
 			"moon":
-				# A thick arc IS a crescent — cheaper and cleaner than
-				# subtracting one circle from another, which would need to know
-				# the colour behind the button.
-				draw_arc(size * 0.5, 5.6, PI * 0.42, PI * 1.58, 22, c, 3.2)
+				# A crescent is one disc minus another, and subtracting means
+				# knowing the colour behind the button — so it is drawn as a
+				# single polygon instead: out along the visible arc of the
+				# disc, back along the bite the second disc takes out of it.
+				# An arc of constant width, which is what this used to be,
+				# has no cusps and reads as a "C".
+				var ctr: Vector2 = size * 0.5
+				var r_out: float = 7.0
+				var r_in: float = 6.5
+				var gap: float = 4.0
+				# Tilted so the horns point up-right, the way a moon is drawn.
+				var tilt: float = -0.6
+				# Where the two circles cross — the cusps — solved for x on the
+				# line between the centres, then read as an angle on each.
+				var xc: float = (r_out * r_out - r_in * r_in + gap * gap) / (2.0 * gap)
+				var yc: float = sqrt(maxf(r_out * r_out - xc * xc, 0.0))
+				var a_out: float = atan2(yc, xc)
+				var a_in: float = atan2(yc, xc - gap)
+				var pts := PackedVector2Array()
+				for i in 15:
+					var a: float = lerpf(a_out, TAU - a_out, float(i) / 14.0)
+					pts.push_back(ctr + (Vector2(cos(a), sin(a)) * r_out).rotated(tilt))
+				for i in 15:
+					var a: float = lerpf(TAU - a_in, a_in, float(i) / 14.0)
+					pts.push_back(ctr + (Vector2(gap, 0.0)
+							+ Vector2(cos(a), sin(a)) * r_in).rotated(tilt))
+				draw_colored_polygon(pts, c)
+				# The polygon fill is not antialiased; tracing its own outline
+				# is what keeps the horns from looking chewed at 18 px.
+				draw_polyline(pts + PackedVector2Array([pts[0]]), c, 1.0, true)
 			"undo", "redo":
 				var ctr: Vector2 = o + Vector2(box * 0.5, box * 0.62)
 				var r: float = box * 0.36
@@ -425,9 +417,9 @@ class RibbonButton extends Button:
 				# The hook past horizontal is what stops the arc reading as a
 				# rainbow: it turns the far end downward, into a tail.
 				if back:
-					draw_arc(ctr, r, PI, TAU + 0.7, 24, c, 1.8)
+					draw_arc(ctr, r, PI, TAU + 0.7, 24, c, 1.8, true)
 				else:
-					draw_arc(ctr, r, PI - 0.7, TAU, 24, c, 1.8)
+					draw_arc(ctr, r, PI - 0.7, TAU, 24, c, 1.8, true)
 				var tip: Vector2 = ctr + Vector2(-r if back else r, 0.0)
 				draw_colored_polygon(PackedVector2Array([
 						tip + Vector2(-3.4, -1.2), tip + Vector2(3.4, -1.2),

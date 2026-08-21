@@ -237,6 +237,13 @@ for (the toolbar button cycles Rich → Source → Split).
 - Telemetry VERIFIED on the wire: a save is the "round", `score` is the word
   count with `score_unit=words`, and `chars` rides along.
 
+**Notes opens on a blank page** (2026-08-21). The welcome template is gone and
+the app no longer auto-opens whatever it found on disk — a word processor
+starts on an empty document with the caret ready, and saved notes are one
+Files press away. VERIFIED on a cold launch: empty text, no filename, not
+dirty, "Untitled", focus already in the editor, and the existing note still on
+disk untouched.
+
 **The toolbar is a word processor's, not a game's** (2026-08-21). The point is
 not the icons — it is that the buttons REPORT as well as command, which is what
 separates a toolbar from a row of shortcuts:
@@ -425,6 +432,158 @@ Three defects were found and fixed during the join, none of which the tests caug
 3. `make new-game` used a `DISPLAY` variable, which Make imports from the environment
    (`:0` on a desktop session) — it would have silently titled a new game ":0".
 
+## Packaging and install
+
+**`make dist` produces a directory you copy anywhere and run.** No toolchain,
+no package manager, no environment setup on the target:
+
+```
+dist/VERSION            0.1.0+4.gab12cd
+dist/install.sh         per-user installer, no sudo
+dist/<game>/meta        id, display name, version
+dist/<game>/icon.svg
+dist/<game>/<game>-{x86_64,arm64,x86_32,arm32}
+```
+
+`dist/install.sh` detects the CPU, installs the matching binary under
+`~/.local/share/qgames/`, and writes an XDG launcher, icon and `.desktop` entry.
+`--uninstall` removes all of it and deliberately leaves saved notes and settings
+in `~/.local/share/godot/app_userdata/`. VERIFIED by installing, running the
+installed binary, and uninstalling: `desktop-file-validate` clean, launcher
+works, and the saved note survived removal.
+
+**Four architectures, on purpose.** Raspberry Pi OS still ships a 32-bit (armhf)
+image and an arm64 binary will not run on it at all. Storage is the cheaper side
+of that trade: the whole `dist/` is ~810 MB for three games.
+
+**`embed_pck=true`: one self-contained file per game per arch.** With a separate
+`.pck`, Godot locates it by matching the executable's BASENAME — so renaming the
+binary during install silently breaks the game. Embedding removes the failure
+mode and costs only the pack's own size (~90 KB).
+
+### Settings ride inside the executable
+
+`tools/bake_config.sh` writes `games/<g>/build_config.cfg` immediately before an
+export. `QConfig` layers it:
+
+```
+defaults  <  res://build_config.cfg  <  user://config.cfg  <  environment
+```
+
+**This exists because a `.desktop` launcher does not inherit your shell
+environment, and Android has no shell at all.** Without it, a game started from
+a menu icon reaches no broker and publishes nothing — which looks exactly like
+everything working. Baking is the only mechanism that behaves identically on a
+desktop launcher, a Pi autostart and an APK, which is why it was chosen over a
+wrapper script that exports variables.
+
+VERIFIED end to end: an exported binary run under `env -i` — a completely empty
+environment — authenticated to a real mosquitto in Docker and published its
+telemetry. A device can still override a baked value in `user://config.cfg`, and
+a dev shell still beats both; both checked.
+
+**The trap this nearly shipped with:** `export_filter="all_resources"` means
+imported RESOURCES. `build_config.cfg` is a plain file, so it was silently left
+out of the pack and the game fell back to its defaults — no broker, version
+`0.0.0-dev`, telemetry publishing nowhere while looking healthy. Naming it in
+`include_filter` fixes it. Caught by grepping the artifact for the broker
+address rather than trusting that the export "worked".
+
+⚠ **A baked build contains the broker password in plain text** — `strings` will
+show it. That is the trade for zero-setup installs on a private LAN. Use
+`tools/bake_config.sh --no-secrets` for anything leaving the house. Both
+`dist/` and `games/*/build_config.cfg` are gitignored, so neither reaches the
+repository.
+
+### Versioning
+
+`tools/version.sh` derives semver from git tags:
+
+| state | version |
+|---|---|
+| on tag `v1.2.3` | `1.2.3` |
+| 4 commits past it | `1.2.3+4.gab12cd` |
+| with local changes | `1.2.3+4.gab12cd.dirty` |
+| no tags yet (today) | `0.0.0+gab12cd` |
+
+Everything after `+` is semver build metadata, which is ignored for precedence —
+the honest encoding, since a build four commits past `v1.2.3` is not `v1.2.4`
+(nobody has decided what the next version is) but must still be distinguishable
+from the tagged release. Only `v[0-9]*.[0-9]*.[0-9]*` tags count, so a stray tag
+cannot become a version. The version is baked into the artifact and readable at
+runtime via `QConfig.version()` / `build_info()`.
+
+**No tags exist yet.** Cut the first with `git tag -a v0.1.0 -m "..."`.
+
+### Android, when it comes
+
+Nothing here blocks it and one thing actively helps: `res://build_config.cfg`
+travels in the `.pck`, so an APK gets its broker settings the same way a desktop
+build does, with no per-device setup. What is still missing is unchanged — JDK
+17, the Android SDK, and an export preset. `install.sh` is Linux-only by nature;
+Android installs through the APK.
+
+## Boot splash
+
+**The Godot logo is gone from all three games** (2026-08-21). Each game boots
+to its own mark on its own background colour, so the splash and the first
+drawn frame are the same colour and there is no flash between them.
+
+Verified against this binary rather than from memory — `application/boot_splash/*`
+has exactly six keys: `image`, `bg_color`, `show_image`, `stretch_mode`,
+`use_filter`, `minimum_display_time`.
+
+- **`image` is PNG only.** The FILE hint is `*.png`; an SVG is rejected. Each
+  game therefore carries a generated `boot_splash.png` (864x864: a 512px icon
+  centred, surround filled opaque in `bg_color`). The padding is deliberate —
+  under `stretch_mode=1` (Keep, fit to the smaller dimension) it is what pins
+  the mark at ~59% of the window instead of letting it fill edge to edge at
+  every resolution.
+- `bg_color` per game is read from that game's own background constant:
+  memory `#19233c`, sequence `#161e34`, notes `#eef1f5` (notes defaults to the
+  light theme).
+- `minimum_display_time` is left at 0, so the splash lasts only as long as the
+  boot (~0.6s). Set it to ~800-1200ms if it should actually register.
+
+**Removing the logo is permitted.** Read from the shipped binary via
+`Engine.get_license_text()`: standard MIT, containing no occurrence of splash,
+logo, trademark, attribution or advertising. The only obligation is that the
+copyright and permission notice accompany copies. Attribution belongs in an
+about/credits screen, and the runtime already supplies what it needs —
+`Engine.get_license_text()`, `get_license_info()` (19 third-party licences),
+`get_copyright_info()` (102 entries). Not built yet.
+
+**Two pre-existing defects surfaced doing this**, both confirmed against the
+committed tree rather than taken on report:
+
+1. `games/sequence` had **no `icon.svg` at all**, while its `project.godot`
+   declared `config/icon="res://icon.svg"` — a dangling reference nothing
+   validated. It now has its own mark.
+2. `games/notes/icon.svg` was **byte-identical to memory's** (same md5). "Each
+   game's own icon" was fiction until this was fixed; notes now has a document
+   mark.
+3. `tools/new_game.sh` copied **no** `icon.svg`, so every scaffolded game was
+   born with the same dangling `config/icon`. It now writes a deliberately
+   blank placeholder — a dashed hollow frame, obviously unset rather than a
+   copy of memory's artwork — generates the splash from it, and gained a
+   `--regen-splash <name>` mode for after you edit an icon. It aborts if the
+   template loses its `boot_splash/image=` line, matching the existing
+   `game_id=` guard.
+
+**How the splash was actually seen** — worth recording, because the usual
+method fails. External capture is unreliable here: `ffmpeg -f x11grab` and
+`xwd -root` return black under Wayland, and GNOME's screenshot D-Bus returns
+`AccessDenied`. But **`xwd -id <window-id>` against the XWayland window returns
+real pixels.** Combined with `minimum_display_time` set high enough to hold the
+splash on screen, that is a working capture path for anything that happens
+before the main scene loads — including an exported release binary, not just an
+editor run. VERIFIED this way for sequence and notes independently of the agent
+that did the work.
+
+Untested: Android (which has its own splash/theme interaction), the arm64
+export, and the native Wayland display driver — every capture used
+`--display-driver x11`.
+
 ## Environment
 
 - Dev box: Ubuntu 24.04, x86_64, 12 cores, 62 GB RAM, 655 GB free. `/dev/kvm` present,
@@ -487,6 +646,25 @@ Three defects were found and fixed during the join, none of which the tests caug
   note arrived byte-exact including multi-byte characters; `ts` landed last; and
   a fresh subscriber replayed ONLY `qGames/notes/content` with `retain=1`,
   proving the broker stored the body and nothing else.
+
+- **`make test` now imports on a fresh checkout** (2026-08-21). `games/<g>/.godot`
+  is generated and correctly gitignored, so a clone has no global class
+  registry — every `class_name` fails to resolve and the whole suite dies with
+  "Parse error" that says nothing about the real cause. Found by cloning the
+  repo and running the suite from the clone, which is the only way this shows
+  up; the working copy always has the cache. CI was already unaffected (it runs
+  `make import` per game first).
+
+- **Retained bodies are truncated on a character boundary** (2026-08-21). A byte
+  limit knows nothing about characters: cutting a 4-byte emoji after two bytes
+  publishes an incomplete sequence, which decodes to a replacement character and
+  logs a warning on the way out. `QTelemetrySchema.utf8_boundary()` walks back
+  off continuation bytes (10xxxxxx) to a character start. It lives in
+  telemetry_schema.gd rather than telemetry.gd for the usual reason — telemetry.gd
+  names the QConfig autoload and therefore cannot be preloaded under `--script`,
+  so a pure function that needs testing has to live somewhere testable. The
+  first version indexed one past the end when nothing needed cutting; its own
+  test caught that.
 
 - **Availability is unimplemented and deferred** (owner's call, 2026-08-20).
   Nothing tells Home Assistant whether a game is running; every sensor is "last
