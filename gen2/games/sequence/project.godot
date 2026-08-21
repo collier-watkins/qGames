@@ -1,0 +1,44 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly, since the parameters
+; that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Sequence"
+run/main_scene="res://src/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.svg"
+
+; Telemetry namespace: qGames/memory/... Declared here rather than derived from
+; config/name, which would publish to qGames/memory_match/ and orphan every
+; existing Home Assistant sensor.
+[telemetry]
+
+game_id="sequence"
+
+[autoload]
+
+QConfig="*res://addons/qcore/config.gd"
+QInput="*res://addons/qcore/input_manager.gd"
+Telemetry="*res://addons/qcore/telemetry.gd"
+QDebug="*res://addons/qcore/debug_hud.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation="sensor_landscape"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

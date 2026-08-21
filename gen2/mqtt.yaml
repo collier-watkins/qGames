@@ -1,0 +1,161 @@
+# Home Assistant MQTT sensors for qGames2.
+#
+# Copy into configuration.yaml under the mqtt: key, or include it:
+#
+#   mqtt: !include mqtt.yaml
+#
+# Trigger automations off the *_ts sensors. They always change, even when a
+# result or score repeats across back-to-back games, and qcore guarantees ts is
+# published LAST — every other value is already updated by the time it lands.
+#
+# ── the common schema ────────────────────────────────────────────────────────
+# Every game publishes the same core under qGames/<game_id>/:
+#
+#   result       win | loss | quit | done
+#   score        int — whatever that game counts
+#   score_unit   moves | shots | rounds | correct — labels `score`
+#   duration_s   seconds the round took
+#   ts           unix seconds, always last
+#
+# So the block below is per-game boilerplate only: copy it, change the two
+# names and the topic prefix. Nothing needs a value_template except ts.
+#
+# Games also publish their own historical topics (memory still emits `moves`)
+# for sensors that predate the common schema.
+#
+# MQTT is ON by default for every game as of 2026-08-21. The broker and its
+# credentials come from the environment (MQTT_BROKER, MQTT_PORT, MQTT_USERNAME,
+# MQTT_PASSWORD — or the same names with a QGAMES_ prefix, which win) or from
+# user://config.cfg, and are never in this repository. With no broker named,
+# the games discard their telemetry silently, exactly as before.
+#
+# NOT YET IMPLEMENTED: availability. Nothing tells Home Assistant whether a
+# game is running — a retained `state` topic is the plan. Until then every
+# sensor here is "last known value", with no way to tell live from stale.
+
+mqtt:
+  sensor:
+
+    # ── Memory Match ─────────────────────────────────────────────────────────
+    - name: "qGames Memory Last Played"
+      unique_id: "qgames2_memory_ts"
+      state_topic: "qGames/memory/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "qGames Memory Result"
+      unique_id: "qgames2_memory_result"
+      state_topic: "qGames/memory/result"
+      icon: "mdi:trophy"
+
+    - name: "qGames Memory Score"
+      unique_id: "qgames2_memory_score"
+      state_topic: "qGames/memory/score"
+      icon: "mdi:cards"
+
+    - name: "qGames Memory Score Unit"
+      unique_id: "qgames2_memory_score_unit"
+      state_topic: "qGames/memory/score_unit"
+      icon: "mdi:tag-outline"
+
+    - name: "qGames Memory Duration"
+      unique_id: "qgames2_memory_duration"
+      state_topic: "qGames/memory/duration_s"
+      unit_of_measurement: "s"
+      device_class: duration
+      icon: "mdi:timer-outline"
+
+    # ── Sequence ─────────────────────────────────────────────────────────────
+    - name: "qGames Sequence Last Completed"
+      unique_id: "qgames2_sequence_ts"
+      state_topic: "qGames/sequence/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "qGames Sequence Result"
+      unique_id: "qgames2_sequence_result"
+      state_topic: "qGames/sequence/result"
+      icon: "mdi:trophy"
+
+    - name: "qGames Sequence Score"
+      unique_id: "qgames2_sequence_score"
+      state_topic: "qGames/sequence/score"
+      unit_of_measurement: "correct"
+      icon: "mdi:star"
+
+    - name: "qGames Sequence Total"
+      unique_id: "qgames2_sequence_total"
+      state_topic: "qGames/sequence/total"
+      unit_of_measurement: "questions"
+      icon: "mdi:counter"
+
+    - name: "qGames Sequence Duration"
+      unique_id: "qgames2_sequence_duration"
+      state_topic: "qGames/sequence/duration_s"
+      unit_of_measurement: "s"
+      device_class: duration
+      icon: "mdi:timer-outline"
+
+    # ── Notes (Markdown word processor) ──────────────────────────────────────
+    # A "round" here is a save. score is the word count, which is the number a
+    # writer recognises; chars rides along as a game-specific topic.
+    - name: "qGames Notes Last Saved"
+      unique_id: "qgames2_notes_ts"
+      state_topic: "qGames/notes/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "qGames Notes Words"
+      unique_id: "qgames2_notes_score"
+      state_topic: "qGames/notes/score"
+      unit_of_measurement: "words"
+      icon: "mdi:text"
+
+    - name: "qGames Notes Characters"
+      unique_id: "qgames2_notes_chars"
+      state_topic: "qGames/notes/chars"
+      unit_of_measurement: "chars"
+      icon: "mdi:format-letter-case"
+
+    # The note itself, retained, so this survives a Home Assistant restart —
+    # unlike every other topic here, which is a fact about a moment.
+    #
+    # A Home Assistant sensor STATE is capped at 255 characters and a longer
+    # one makes the entity unavailable, so the state below is truncated on
+    # purpose. The full Markdown is on the topic itself: point a Markdown card
+    # at it via an MQTT trigger, or read it in a template, rather than trying
+    # to widen this sensor.
+    - name: "qGames Notes Content"
+      unique_id: "qgames2_notes_content"
+      state_topic: "qGames/notes/content"
+      value_template: "{{ value[:250] }}"
+      icon: "mdi:text-long"
+
+    - name: "qGames Notes Title"
+      unique_id: "qgames2_notes_title"
+      state_topic: "qGames/notes/title"
+      icon: "mdi:format-title"
+
+    - name: "qGames Notes Filename"
+      unique_id: "qgames2_notes_filename"
+      state_topic: "qGames/notes/filename"
+      icon: "mdi:file-document-outline"
+
+
+    # ── Diagnostics ──────────────────────────────────────────────────────────
+    # Only published when telemetry/perf_interval_sec is non-zero, which is off
+    # by default. Turn it on to watch a game on the Pi from Home Assistant.
+    - name: "qGames Memory FPS"
+      unique_id: "qgames2_memory_fps"
+      state_topic: "qGames/memory/perf/fps"
+      unit_of_measurement: "fps"
+      entity_category: diagnostic
+      icon: "mdi:speedometer"
+
+    - name: "qGames Memory Memory Used"
+      unique_id: "qgames2_memory_mem_mb"
+      state_topic: "qGames/memory/perf/mem_mb"
+      unit_of_measurement: "MB"
+      device_class: data_size
+      entity_category: diagnostic
+      icon: "mdi:memory"

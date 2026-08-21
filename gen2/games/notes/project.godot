@@ -1,0 +1,50 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly, since the parameters
+; that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Notes"
+run/main_scene="res://src/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.svg"
+
+; Telemetry namespace: qGames/memory/... Declared here rather than derived from
+; config/name, which would publish to qGames/memory_match/ and orphan every
+; existing Home Assistant sensor.
+[telemetry]
+
+game_id="notes"
+
+[autoload]
+
+QConfig="*res://addons/qcore/config.gd"
+QInput="*res://addons/qcore/input_manager.gd"
+Telemetry="*res://addons/qcore/telemetry.gd"
+QDebug="*res://addons/qcore/debug_hud.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/resizable=true
+; Stretch is DISABLED here, unlike the other games. canvas_items+expand keeps a
+; 1280x720 logical viewport and scales it, which is right for a card game and
+; wrong for a text editor: on a 720x1280 phone the logical viewport becomes
+; 1280x2275, so a 17px font lands at ~9 physical pixels and every width test
+; ("is there room to split?") reads 1280 no matter how narrow the screen is.
+; With stretch off, one logical pixel is one physical pixel and the layout is
+; responsive for real. See _split_allowed() in src/main.gd.
+window/stretch/mode="disabled"
+window/handheld/orientation="sensor_landscape"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

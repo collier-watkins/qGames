@@ -1,0 +1,17 @@
+# Godot editor / import cache — regenerated per-machine, per-clone.
+.godot/
+.import/
+
+# Build output.
+dist/
+
+# NOTE: export_presets.cfg is tracked. It holds no secrets in this repo
+# (paths and preset config only) — do not add it here without checking first.
+
+# Local/dev secrets. QGAMES_* config lives in env vars or user://config.cfg
+# outside the repo, but ignore stray .env files defensively.
+*.env
+
+# Editor / OS junk.
+*.tmp
+.DS_Store
