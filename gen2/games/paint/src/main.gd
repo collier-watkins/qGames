@@ -438,6 +438,11 @@ class CanvasView extends Control:
 	## the paper. The OS cursor is hidden there and the tool drawn instead.
 	var _pointer: Vector2 = Vector2.ZERO
 	var _pointer_on_paper: bool = false
+	## The keyboard pointer stays hidden until somebody actually steers it.
+	## QInput reports "key" before ANY input has happened, so trusting that
+	## alone parks a crosshair in the middle of a fresh window for every mouse
+	## user — which is exactly the thing it was removed for.
+	var _keys_used: bool = false
 	var _scale: float = 1.0
 	var _offset: Vector2 = Vector2.ZERO
 	## Set when the picture changed; the upload happens once in _process.
@@ -521,7 +526,7 @@ class CanvasView extends Control:
 		# the paper, because that is plainly where the child is looking.
 		if _pointer_on_paper:
 			_draw_tool(_pointer, false)
-		elif has_focus() and QInput.wants_focus_ui():
+		elif _keys_used and has_focus() and QInput.wants_focus_ui():
 			_draw_tool(_offset + Vector2(_cursor) * _scale, _pen_down)
 
 	## The pointer IS the tool: a circle the size of the brush, a white block
@@ -645,6 +650,7 @@ class CanvasView extends Control:
 			KEY_UP: step = Vector2i(0, -1)
 			KEY_DOWN: step = Vector2i(0, 1)
 			KEY_SPACE, KEY_ENTER, KEY_KP_ENTER:
+				_keys_used = true
 				if _pen_down:
 					_pen_down = false
 					_end()
@@ -656,6 +662,7 @@ class CanvasView extends Control:
 				return
 		if step == Vector2i.ZERO:
 			return
+		_keys_used = true
 		# A brush-sized step, so crossing the canvas does not take all day.
 		var jump: int = maxi(2, owner_game.brush_radius())
 		if key.shift_pressed:
