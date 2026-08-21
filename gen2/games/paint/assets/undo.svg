@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- An arrow curving back on itself: over the top, round to the right, and
+       down — with the head on the left, where the motion ends. -->
+  <path d="M20 26 H36 a15 15 0 1 1 -15 15"
+        fill="none" stroke="#23262b" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="27,14 27,38 11,26" fill="#23262b"/>
+</svg>

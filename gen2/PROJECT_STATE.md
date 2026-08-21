@@ -177,6 +177,119 @@ games of different shapes, keypad-plus-touch works on all three, GDScript suits
 the work, and the Linux x86_64 and arm64 exports come out clean. **Android is
 still unanswered** — the SDK is not installed, so no APK has ever been built.
 
+**Fourth game, new: `paint`** (2026-08-21). A drawing pad that saves PNGs.
+Three tools (brush, rubber, fill), twelve colours, four brush sizes, undo,
+clear, save. Deliberately no layers, shapes or text — a child should be able to
+use all of it without being shown.
+
+**It exists because the gen1 version crashed the Pi, and the cause was looked
+up rather than guessed at.** gen1's `games/paint/main.py` held
+`deque(maxlen=20)` for undo AND another for redo — bounded by COUNT, but each
+entry was a full-resolution `Surface.copy()`. Forty copies at roughly 6 MB
+apiece on a 1080p screen is about **240 MB of "bounded" history**. So the fix
+was never "add a cap"; it was cap the BYTES and stop storing raw pixels.
+
+- History is capped at 24 steps **and** 8 MB, whichever bites first, and every
+  entry is a PNG rather than raw pixels. A painting is mostly flat colour and
+  compresses enormously — measured, a typical picture is 3.52 MB raw and
+  0.02 MB as PNG.
+- There is exactly ONE `Image` and ONE `ImageTexture` for the life of the game.
+  The texture is `update()`d in place; building an `ImageTexture` per change is
+  the standard way to leak in Godot and would put the crash straight back.
+- The canvas is a FIXED 1280x720, scaled to fit the window. Reallocating the
+  image on every resize would churn megabytes for nothing, and it means a
+  picture drawn on a laptop and one drawn on a Pi are the same picture.
+
+VERIFIED by soak, not by argument: **300 strokes with fills, undos, redos and
+clears mixed in, RSS oscillating 196-205 MB with no trend**, history pinned at
+24 steps and 1-1.7 MB throughout. (The debug HUD's slope reads +12 MB/min on
+this run and is wrong: its least-squares window is fitting noise on a signal
+that bounces a few MB. The absolute readings are the evidence, not the slope —
+worth remembering the next time that number is quoted.)
+
+**Three performance problems, all found by measuring rather than guessing:**
+
+1. `set_pixel` per pixel made the biggest brush cost **30 ms per 100 px of
+   drag** — below 60 fps while drawing, and five times worse on a Pi. A round
+   dab is 2r+1 contiguous ROWS, so it is now that many `fill_rect` calls
+   instead of pi*r^2 pixel writes: 69 calls rather than 3600 at the largest
+   size. Strokes also step by half a brush radius rather than every pixel,
+   since a round dab covers everything within r. Measured 30 ms -> 0.1 ms.
+2. A full-canvas flood fill took **737 ms** through `get_pixel`/`set_pixel`,
+   and 784 ms through a `PackedByteArray` — indexing bytes in GDScript costs
+   about as much as a Color, four times over. Viewing the buffer as int32s
+   makes a pixel test one integer compare: **170 ms**. Still the slowest thing
+   in the game, and a beat on a Pi, but it is a deliberate one-off action.
+   The int32 packing depends on byte order, so a test compares a filled pixel
+   against one drawn the ordinary way rather than assuming it.
+3. Every dab reported a change and the view uploaded the whole 3.5 MB texture
+   each time — dozens of GPU uploads for one drag, at 47 ms frames. Uploads
+   are now coalesced to one per frame, since the screen can only show one
+   anyway: 47 ms -> 18 ms, CPU 91% -> 58%.
+
+The PNG snapshot for undo costs ~29 ms, and it is taken when a stroke ENDS
+rather than when it begins. Same cost either way, but at touch-down it lands
+in the middle of a child starting to draw, which is the worst possible moment.
+
+**The eraser rubs out a BLOCK**, not a circle — one `fill_rect` per dab, so it
+is also the cheapest tool in the game. It matters because the pointer shows a
+square: drawing a square while erasing a circle is a small lie a child finds
+the first time they try to clear a corner. The round dab is untouched; only the
+eraser asks for a square, and a test checks both (the square reaches its corner,
+the circle does not).
+
+**The tool buttons carry icons** (`assets/tool_*.svg`), authored at button size.
+An earlier attempt reused the 64px cursor art and it simply never appeared —
+worth knowing before reaching for `expand_icon` again. The picture matters more
+than the word here: a four-year-old who cannot read still knows which one is the
+brush.
+
+**The pointer IS the tool** (2026-08-21). Over the paper the OS cursor is
+hidden and the tool drawn in its place, at the ON-SCREEN scale — so what is
+outlined is exactly what will be marked, which an OS cursor could not manage
+because the canvas is scaled to fit the window. A circle the size of the brush,
+a white block for the eraser, a tipped bucket for fill with a drop of the
+chosen colour where the paint will land. The mouse mode is restored on mouse
+exit, on window focus loss and on tree exit: a hidden cursor that escapes onto
+the desktop is a genuinely alarming bug.
+
+The fixed crosshair is gone. A keyboard pointer is still drawn, but only when
+`QInput.wants_focus_ui()` says somebody is actually driving with keys or a pad,
+and never at the same time as the mouse one — a crosshair parked in the middle
+of the paper for a mouse user is just a smudge they cannot rub out.
+
+Undo and redo are SVG icons (`assets/undo.svg`, `assets/redo.svg`); the bucket
+is an SVG too, drawn both on the Fill button and as the cursor. The palette is
+twelve colours with the plain primaries rather than muted designer versions — a
+child asking for "blue" means blue — plus pink. "Rubber" is now "Eraser".
+
+Pictures are written to `user://paintings/` — app-private on Android,
+`~/.local/share/godot/app_userdata/Paint/paintings/` on Linux. MQTT VERIFIED
+on the wire, and not just that it published — the bytes were pulled back off
+the broker and decoded, giving a 1280x720 PNG of the actual painting. The
+picture goes to `qGames/paint/image` RETAINED and FIRST, then the scalars, with
+`ts` last, so anything reacting to ts already has the image. Home Assistant
+needs an MQTT *camera* for it; a sensor state cannot carry binary at all.
+
+**It is sent at full size, and copying gen1 here was a mistake.** gen1 scaled to
+800px wide before publishing, so this did too — until it was measured:
+
+| painting | full PNG | 800px bilinear | 800px nearest |
+|----------|---------:|---------------:|--------------:|
+| simple   |    12 KB |          20 KB |          6 KB |
+| busy     |    63 KB |         128 KB |         39 KB |
+| dense    |    87 KB |         167 KB |         53 KB |
+
+A bilinear downscale blurs flat colour into gradients, which is precisely what
+PNG compresses well — so the "thumbnail" came out roughly TWICE the size of the
+original. The full picture now goes out as-is: smaller than the scaled version
+and at full quality. A cap remains as a safety net, and steps down with NEAREST
+(which keeps flat areas flat) only if a picture ever exceeds it, because a
+broker that refuses an oversized packet drops the publish silently. A test
+asserts the bilinear result is larger, so nobody reintroduces the scaling as an
+optimisation. gen1 also wrote its thumbnail to a file in ~/Pictures and left it
+there; this publishes bytes and leaves nothing behind.
+
 **Third game, new: `notes`** (2026-08-20, rewritten as a WYSIWYG editor
 2026-08-21). A small Markdown word processor. Not a port; nothing like it
 existed in the old suite. Files live in `user://notes/*.md`, so app-private

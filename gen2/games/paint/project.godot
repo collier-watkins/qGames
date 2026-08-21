@@ -1,0 +1,76 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly, since the parameters
+; that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Paint"
+run/main_scene="res://src/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.svg"
+
+; Boot splash. Replaces Godot's own logo, on its default #242424 grey, with this
+; game's icon on this game's own background colour, so the splash and the first
+; frame the game draws are the same field. Godot is MIT licensed and imposes no
+; boot-attribution requirement, so removing the engine logo is permitted; engine
+; credit belongs in an in-game about/credits surface instead.
+;
+; Keys verified against Godot 4.7.2 via ProjectSettings.get_property_list():
+;   image                 String, FILE hint "*.png" — PNG only, an SVG is not accepted.
+;   bg_color              Color, engine default (0.14, 0.14, 0.14, 1) = #242424.
+;   show_image            bool, default true — false gives a bare colour field.
+;   stretch_mode          int enum: 0 Disabled (native size, centred), 1 Keep
+;                          (default; fit to the window's smaller dimension,
+;                          aspect preserved), 2 Keep Width, 3 Keep Height,
+;                          4 Cover, 5 Ignore.
+;   use_filter            bool, default true — smooths the scale.
+;   minimum_display_time  int ms, default 0 — holds the splash open; measured
+;                          honoured on a non-exported run (0.6s -> 6.1s at 6000).
+;
+; boot_splash.png is 864x864 with the 512px icon centred and the surround filled
+; opaque in bg_color. Under stretch_mode=Keep that padding is what pins the mark
+; at ~59% of the screen's smaller dimension at ANY resolution rather than
+; letting it fill edge to edge, and the opaque fill hides the image's own
+; boundary (a transparent pad leaves a visible seam). Regenerate it from
+; icon.svg if the icon changes — see tools/new_game.sh for the one-liner.
+; bg_color source: C_BG in src/main.gd (#19233c)
+boot_splash/bg_color=Color(0.9137, 0.9176, 0.9333, 1)
+boot_splash/image="res://boot_splash.png"
+boot_splash/show_image=true
+boot_splash/stretch_mode=1
+boot_splash/use_filter=true
+
+
+; Telemetry namespace: qGames/memory/... Declared here rather than derived from
+; config/name, which would publish to qGames/memory_match/ and orphan every
+; existing Home Assistant sensor.
+[telemetry]
+
+game_id="paint"
+
+[autoload]
+
+QConfig="*res://addons/qcore/config.gd"
+QInput="*res://addons/qcore/input_manager.gd"
+Telemetry="*res://addons/qcore/telemetry.gd"
+QDebug="*res://addons/qcore/debug_hud.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation="sensor_landscape"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

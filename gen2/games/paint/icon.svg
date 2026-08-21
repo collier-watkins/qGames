@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <rect width="256" height="256" rx="40" fill="#e9eaee"/>
+  <!-- Paper, with three strokes on it. -->
+  <rect x="34" y="42" width="188" height="140" rx="10" fill="#ffffff" stroke="#c3c7ce" stroke-width="4"/>
+  <path d="M56 96 q28 -28 56 0 t56 0 t28 -14" fill="none" stroke="#e74c3c" stroke-width="14" stroke-linecap="round"/>
+  <path d="M56 132 q28 -28 56 0 t56 0 t28 -14" fill="none" stroke="#2ecc71" stroke-width="14" stroke-linecap="round"/>
+  <path d="M56 166 q28 -28 56 0 t56 0 t28 -14" fill="none" stroke="#3498db" stroke-width="14" stroke-linecap="round"/>
+  <!-- Palette dabs below the page. -->
+  <circle cx="70"  cy="216" r="16" fill="#e74c3c"/>
+  <circle cx="112" cy="216" r="16" fill="#f1c40f"/>
+  <circle cx="154" cy="216" r="16" fill="#2ecc71"/>
+  <circle cx="196" cy="216" r="16" fill="#2c3e9f"/>
+</svg>

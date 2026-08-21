@@ -96,6 +96,40 @@ mqtt:
       device_class: duration
       icon: "mdi:timer-outline"
 
+    # ── Paint (drawing pad) ──────────────────────────────────────────────────
+    # The picture itself goes to qGames/paint/image as PNG bytes, RETAINED and
+    # at FULL SIZE, so a dashboard restarting later still has it. Show it with
+    # an MQTT camera (below); a sensor state cannot hold binary at all.
+    #
+    # Full size, not a thumbnail: downscaling measured LARGER, because blurring
+    # flat colour into gradients is exactly what stops PNG compressing. A busy
+    # 1280x720 painting is about 87 KB on the wire.
+    - name: "qGames Paint Last Saved"
+      unique_id: "qgames2_paint_ts"
+      state_topic: "qGames/paint/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "qGames Paint Filename"
+      unique_id: "qgames2_paint_saved"
+      state_topic: "qGames/paint/saved"
+      icon: "mdi:file-image-outline"
+
+    - name: "qGames Paint Image Size"
+      unique_id: "qgames2_paint_image_bytes"
+      state_topic: "qGames/paint/image_bytes"
+      unit_of_measurement: "B"
+      device_class: data_size
+      state_class: measurement
+      icon: "mdi:image-size-select-large"
+
+    - name: "qGames Paint Strokes"
+      unique_id: "qgames2_paint_score"
+      state_topic: "qGames/paint/score"
+      unit_of_measurement: "strokes"
+      state_class: measurement
+      icon: "mdi:brush"
+
     # ── Notes (Markdown word processor) ──────────────────────────────────────
     # A "round" here is a save. score is the word count, which is the number a
     # writer recognises; chars rides along as a game-specific topic.
@@ -159,3 +193,10 @@ mqtt:
       device_class: data_size
       entity_category: diagnostic
       icon: "mdi:memory"
+
+  # The painting itself. A camera, not a sensor: a sensor state is capped at
+  # 255 characters and cannot carry an image at all.
+  camera:
+    - name: "qGames Paint"
+      unique_id: "qgames2_paint_image"
+      topic: "qGames/paint/image"

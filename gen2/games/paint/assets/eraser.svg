@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- A block eraser held at an angle, rubbing along a line. -->
+  <g transform="rotate(-32 32 30)">
+    <rect x="16" y="12" width="32" height="26" rx="5"
+          fill="#ffffff" stroke="#23262b" stroke-width="4"/>
+    <line x1="16" y1="26" x2="48" y2="26" stroke="#23262b" stroke-width="4"/>
+  </g>
+  <line x1="12" y1="52" x2="52" y2="52" stroke="#23262b"
+        stroke-width="4" stroke-linecap="round"/>
+</svg>
