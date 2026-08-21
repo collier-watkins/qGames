@@ -62,7 +62,15 @@ func _ready() -> void:
 
 	var cfg: Node = get_node_or_null("/root/QConfig")
 	var want: String = str(cfg.get_value("debug/hud", "auto")) if cfg != null else "auto"
-	_enabled = want == "on" or (want != "off" and OS.is_debug_build())
+	# "off" is the only setting that takes the readout away entirely. It used to
+	# be unavailable in a release export as well, which made the toggle useless
+	# in the build people actually run — asking someone to reinstall a debug
+	# build to look at a frame time is not a debug tool.
+	#
+	# So the KEY works everywhere and the DISPLAY is what differs: a debug run
+	# honours debug/hud_start, a release export starts hidden unless explicitly
+	# set to "on". A child will not stumble onto Ctrl+Shift+D.
+	_enabled = want != "off"
 	if not _enabled:
 		set_process(false)
 		set_process_input(false)
@@ -75,6 +83,9 @@ func _ready() -> void:
 	_build_ui()
 
 	var start: String = str(cfg.get_value("debug/hud_start", "compact")) if cfg != null else "compact"
+	# A shipped game shows nothing until asked, whatever hud_start says.
+	if want != "on" and not OS.is_debug_build():
+		start = "off"
 	match start:
 		"full":
 			set_mode(Mode.FULL)

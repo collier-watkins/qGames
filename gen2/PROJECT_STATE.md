@@ -626,7 +626,12 @@ from the tagged release. Only `v[0-9]*.[0-9]*.[0-9]*` tags count, so a stray tag
 cannot become a version. The version is baked into the artifact and readable at
 runtime via `QConfig.version()` / `build_info()`.
 
-**No tags exist yet.** Cut the first with `git tag -a v0.1.0 -m "..."`.
+**v0.1.0 is cut.** `tools/release.sh patch|minor|major` (or
+`make release BUMP=minor`) computes the next version from the latest tag,
+writes the commits since as the tag message, and refuses a dirty tree — a
+release has to be reproducible from its tag. Rebuild afterwards so the
+artefacts carry it; `make dist` bakes the version in and the debug readout
+shows it.
 
 ### Android, when it comes
 
@@ -648,6 +653,14 @@ and some have no F row at all. Shift is part of every combination on purpose —
 games bind plain Ctrl+letter freely and mostly do not check shift — and D, W
 and M are bound by no game regardless. The HUD listens on `_input`, so it sees
 keys before any Control and a focused text field cannot swallow the toggle.
+
+**The toggle works in a SHIPPED build**, which it did not before. `debug/hud`
+used to mean "debug builds only", so the hotkey did nothing in the export people
+actually run — and asking someone to reinstall a debug build to look at a frame
+time is not a debug tool. Now only `off` removes it: the key works everywhere,
+and it is the DISPLAY that differs, starting hidden in a release export unless
+`debug/hud=on`. VERIFIED by running the installed release binary with default
+settings and seeing the readout live.
 
 **The readout leads with the build.** Compact shows `v0.1.0` (or `dev`); full
 shows the game name, the full version including build metadata, and when it was
