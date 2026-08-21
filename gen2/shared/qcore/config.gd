@@ -51,6 +51,9 @@ const DEFAULTS := {
 	"debug/hud_stdout": false,           # also print one line/sec — headless, CI, ssh
 	# Per-app appearance. Games ignore it; the notes editor reads it.
 	"ui/theme": "light",
+	# How big everything is drawn, independent of window size. Every game
+	# honours it (QGameRoot), and Ctrl +/-/0 changes it at runtime.
+	"ui/scale": 1.0,
 	# Stamped into the export by tools/bake_config.sh. A source checkout keeps
 	# these defaults, which is how you tell a dev run from a shipped build.
 	"build/version": "0.0.0-dev",

@@ -145,8 +145,13 @@ func _build_ui() -> void:
 
 
 func _build_toolbar() -> Control:
-	var bar := HBoxContainer.new()
-	bar.add_theme_constant_override("separation", 6)
+	# An HFlowContainer, not an HBox: three tools, four sizes, twelve colours
+	# and four actions do not fit one row on a narrow window — and they REALLY
+	# do not once the reading size is turned up, which shrinks the logical
+	# viewport. An HBox would simply overflow and shove the paper off screen.
+	var bar := HFlowContainer.new()
+	bar.add_theme_constant_override("h_separation", 6)
+	bar.add_theme_constant_override("v_separation", 6)
 
 	_tool_buttons = []
 	for tool in [Tool.BRUSH, Tool.ERASER, Tool.FILL]:
@@ -186,10 +191,7 @@ func _build_toolbar() -> Control:
 		_swatches.append(s)
 		bar.add_child(s)
 
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bar.add_child(spacer)
+	bar.add_child(_separator())
 
 	_undo_button = _make_icon_button(ICON_UNDO, _on_undo, "Undo  (Ctrl+Z)")
 	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")

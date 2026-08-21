@@ -636,6 +636,40 @@ build does, with no per-device setup. What is still missing is unchanged — JDK
 17, the Android SDK, and an export preset. `install.sh` is Linux-only by nature;
 Android installs through the APK.
 
+## Reading size (Ctrl +/-/0)
+
+**Every game can be scaled at runtime, platform-wide** (2026-08-21). Ctrl and
+`+`, `-` or `0` — the combination every browser already uses. A brief toast
+says "Size 130%", the choice is saved to `ui/scale` and survives a restart, and
+the range is 0.6x to 2.4x in tenths.
+
+It lives in `QGameRoot` because every game inherits it: a reading size that only
+some games honoured would be worse than none. The mechanism is Godot's
+`Window.content_scale_factor`, which multiplies the stretch — at 1.5 the logical
+viewport shrinks from 1280 wide to 853, so every control, font and drawn pixel
+comes out half again as big. That is the honest knob for "too small on the telly,
+too big on the laptop": it moves the whole interface at once rather than being a
+font setting that leaves the artwork behind.
+
+The scale is applied BEFORE the first viewport sync, so a game lays out once at
+the size it will actually have instead of laying out twice and flashing.
+
+**It exposed a latent layout bug in paint.** Turning the size up shrinks the
+logical viewport, and paint's toolbar — three tools, four sizes, twelve colours,
+four actions — did not fit one row, so the `HBoxContainer` overflowed and shoved
+the paper off screen. It is now an `HFlowContainer`, which wraps. The same would
+have happened on any sufficiently narrow window; scaling just made it easy to
+reach. VERIFIED at 0.7x, 1.0x and 1.6x in all four games, with the hotkeys,
+clamping and persistence each checked on a real run.
+
+KNOWN, not fixed: at 1.6x in a short window, sequence's four answer tiles wrap
+to two rows and the lower one clips. That is the same clipping a genuinely small
+window produces — surfaced by scaling rather than caused by it — and the fix is
+in that game's layout, not here.
+
+Untested: Android. There is no keyboard there, so the size can only be changed
+by editing `user://config.cfg` until a gesture or a settings control exists.
+
 ## Boot splash
 
 **The Godot logo is gone from all three games** (2026-08-21). Each game boots
