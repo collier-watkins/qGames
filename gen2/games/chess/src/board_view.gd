@@ -82,6 +82,10 @@ var _press_pos: Vector2 = Vector2.ZERO
 ## which is the tap-tap path; above it, the piece follows the finger.
 const DRAG_SLOP: float = 8.0
 
+## Where the piece artwork comes from. Owned here because the board is the only
+## thing that draws pieces at board size; the promotion picker asks it too.
+var art: ChessPieceArt = ChessPieceArt.new()
+
 var _square: float = 64.0
 var _origin: Vector2 = Vector2.ZERO
 
@@ -101,6 +105,7 @@ var _idle_accum: float = 0.0
 func _init() -> void:
 	focus_mode = Control.FOCUS_ALL
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	art.load_set()
 
 
 func show_position(b: ChessBoard, from_sq: int = -1, to_sq: int = -1) -> void:
@@ -436,6 +441,7 @@ func _draw() -> void:
 	if board == null:
 		return
 
+	art.set_square_size(_square)
 	var font: Font = ThemeDB.fallback_font
 	var coord_size: int = int(maxf(9.0, _square * 0.20))
 
@@ -557,7 +563,7 @@ func _draw_piece_at(p: int, r: Rect2, alpha: float = 1.0) -> void:
 	if alpha < 1.0:
 		fill.a = alpha
 		edge.a = alpha
-	ChessPieces.draw_piece(self, absi(p), r.grow(-r.size.x * 0.06), fill, edge)
+	art.draw(self, p, r.grow(-r.size.x * 0.06), fill, edge)
 
 
 func _draw_arrow(from: Vector2, to: Vector2) -> void:

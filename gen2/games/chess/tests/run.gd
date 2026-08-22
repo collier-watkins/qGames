@@ -37,6 +37,7 @@ func _initialize() -> void:
 	_test_piece_paths()
 	_test_audio_cues()
 	_test_easing()
+	_test_piece_set_files()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -660,7 +661,7 @@ func _test_audio_cues() -> void:
 			peak = maxf(peak, absf(v))
 		if peak > ChessAudio.PEAK + 0.01:
 			within_headroom = false
-		if peak < 0.2:
+		if peak < 0.05:
 			audible = false
 		# A buffer that starts or ends on a non-zero sample ticks on its own.
 		if absf(f[0]) > 0.001 or absf(f[f.size() - 1]) > 0.001:
@@ -700,6 +701,46 @@ func _test_audio_cues() -> void:
 	_check("a capture rings longer than a move", capture_len > move_len)
 	_check("a pick-up is the shortest cue of all", select_len < move_len)
 
+	# The MIX, not the synthesis. Normalising every cue to one peak made the
+	# pick-up tick as loud as the win chime — the sound heard forty times a
+	# game as prominent as the one heard once. These assertions are what stops
+	# that coming back.
+	var quiet: float = _peak_of(audio, ChessAudio.SELECT)
+	var move_peak: float = _peak_of(audio, ChessAudio.MOVE)
+	var capture_peak: float = _peak_of(audio, ChessAudio.CAPTURE)
+	_check("the pick-up tick is far quieter than a move", quiet < move_peak * 0.4)
+	_check("a capture is louder than a move", capture_peak > move_peak)
+	_check("nothing is louder than a capture by much",
+			_peak_of(audio, ChessAudio.WIN) < capture_peak * 1.2)
+
+	# ...and the LENGTHS. A move is heard on nearly every ply; anything that
+	# rings on for a tenth of a second becomes a musical event and then an
+	# irritation.
+	_check("a move is over inside a tenth of a second",
+			_audible_ms(audio, ChessAudio.MOVE) < 100.0)
+	_check("a pick-up is over inside a twentieth",
+			_audible_ms(audio, ChessAudio.SELECT) < 50.0)
+	_check("only the end-of-game cue is allowed to be long",
+			_audible_ms(audio, ChessAudio.WIN) > _audible_ms(audio, ChessAudio.CHECK))
+
+
+func _peak_of(audio: ChessAudio, cue: String) -> float:
+	var peak: float = 0.0
+	for v in ChessAudio.to_floats(audio._streams[cue]):
+		peak = maxf(peak, absf(v))
+	return peak
+
+
+func _audible_ms(audio: ChessAudio, cue: String) -> float:
+	## How long the cue can actually be heard, not how long its buffer is —
+	## the tail below 1% of peak is silence as far as anyone listening cares.
+	var f: PackedFloat32Array = ChessAudio.to_floats(audio._streams[cue])
+	var peak: float = _peak_of(audio, cue)
+	for i in range(f.size() - 1, -1, -1):
+		if absf(f[i]) > peak * 0.01:
+			return 1000.0 * (i + 1) / ChessAudio.MIX_RATE
+	return 0.0
+
 
 # -------------------------------------------------------------------- easing
 
@@ -722,3 +763,80 @@ func _test_easing() -> void:
 	_check("easing is clamped outside 0..1",
 			is_equal_approx(ChessBoardView._ease_out(1.5), 1.0)
 			and is_equal_approx(ChessBoardView._ease_out(-0.5), 0.0))
+
+
+# --------------------------------------------------------- editable piece set
+
+func _test_piece_set_files() -> void:
+	## The point of this feature is that somebody can edit the pieces without a
+	## rebuild, so what is tested is the contract they rely on: the names, that
+	## the exported files are valid SVG, and that a partial set falls back per
+	## piece rather than all-or-nothing.
+	var types: Array[int] = [ChessPieces.KING, ChessPieces.QUEEN, ChessPieces.ROOK,
+			ChessPieces.BISHOP, ChessPieces.KNIGHT, ChessPieces.PAWN]
+	_eq("white king is wK.svg", ChessPieces.file_name(ChessPieces.KING, true), "wK.svg")
+	_eq("black knight is bN.svg", ChessPieces.file_name(ChessPieces.KNIGHT, false), "bN.svg")
+	var names: Dictionary = {}
+	for type: int in types:
+		for white: bool in [true, false]:
+			names[ChessPieces.file_name(type, white)] = true
+	_eq("twelve distinct filenames", names.size(), 12)
+
+	var all_parse: bool = true
+	var all_have_paths: bool = true
+	var art: Vector2 = ChessPieces.ART_MAX - ChessPieces.ART_MIN
+	var box: String = "viewBox=\"0 0 %.0f %.0f\"" % [art.x, art.y]
+	var all_boxed: bool = true
+	for type: int in types:
+		for white: bool in [true, false]:
+			var svg: String = ChessPieces.to_svg(type, white)
+			if not svg.contains("<path"):
+				all_have_paths = false
+			if not svg.contains(box):
+				all_boxed = false
+			# The real test: the rasteriser has to accept it. A file the game
+			# cannot read is worse than no file, because it looks like the
+			# edit did nothing.
+			var img := Image.new()
+			if img.load_svg_from_string(svg, 1.0) != OK or img.get_width() < 8:
+				all_parse = false
+	_check("every exported piece is valid SVG the engine can rasterise", all_parse)
+	_check("every exported piece carries path data", all_have_paths)
+	_check("every exported piece uses the fitted art box as its viewBox", all_boxed)
+
+	# White and black must differ, or a dumped set is unusable.
+	_check("the two colours are not the same file",
+			ChessPieces.to_svg(ChessPieces.KING, true)
+			!= ChessPieces.to_svg(ChessPieces.KING, false))
+
+	var dir: String = "user://_test_pieces"
+	var written: String = ChessPieceArt.dump_builtin(dir)
+	_check("the set can be written out", written != "")
+	_check("...with a note explaining what it is",
+			FileAccess.file_exists(dir.path_join("README.txt")))
+
+	var art_all := ChessPieceArt.new()
+	art_all.load_set(dir, "res://__none__")
+	_check("a full directory is picked up", art_all.source.contains("12 of 12"))
+
+	# Remove one file: that piece must fall back on its own, not the whole set.
+	DirAccess.remove_absolute(dir.path_join("wN.svg"))
+	var art_partial := ChessPieceArt.new()
+	art_partial.load_set(dir, "res://__none__")
+	_check("a partial set is still used", art_partial.source.contains("11 of 12"))
+
+	var art_none := ChessPieceArt.new()
+	art_none.load_set("user://__none__", "res://__none__")
+	_eq("no files means the built-in artwork", art_none.source, "built-in")
+
+	# Raster size buckets: a piece must be downscaled, never up.
+	var sized := ChessPieceArt.new()
+	sized.load_set(dir, "res://__none__")
+	sized.set_square_size(70.0)
+	_check("the raster bucket is at or above the drawn size",
+			sized._bucket >= 70 and sized._bucket <= 128)
+
+	for name: String in ["wK.svg", "wQ.svg", "wR.svg", "wB.svg", "wP.svg",
+			"bK.svg", "bQ.svg", "bR.svg", "bB.svg", "bN.svg", "bP.svg", "README.txt"]:
+		DirAccess.remove_absolute(dir.path_join(name))
+	DirAccess.remove_absolute(dir)

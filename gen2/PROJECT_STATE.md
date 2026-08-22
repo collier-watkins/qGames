@@ -165,8 +165,8 @@ returns to scope).
 
 ## Current state
 
-**Five games built, all tests green** (2026-08-22): chess 169/169, memory 74/74,
-notes 332/332, paint 56/56, sequence 27/27 — 658 tests, 0 failures.
+**Five games built, all tests green** (2026-08-22): chess 188/188, memory 74/74,
+notes 332/332, paint 56/56, sequence 27/27 — 677 tests, 0 failures.
 
 The project began as a spike — port `memory` (the old suite's smallest game, 281
 lines) to prove the workflow before committing to a full rewrite. The spike's
@@ -174,6 +174,64 @@ questions are now answered except one: the code-first loop holds up across three
 games of different shapes, keypad-plus-touch works on all three, GDScript suits
 the work, and the Linux x86_64 and arm64 exports come out clean. **Android is
 still unanswered** — the SDK is not installed, so no APK has ever been built.
+
+**Second chess polish pass** (2026-08-22), on the owner's report that the
+sounds were annoying and a question about editing the pieces.
+
+**Half of "annoying" was mixing, not synthesis.** `_finish` normalised every
+cue to the same peak, so the pick-up tick was exactly as loud as the win chime
+— the sound heard forty times a game as prominent as the one heard once. Each
+cue is now peaked to its own level, and tests assert the ordering: the tick is
+under 40% of a move, a capture is louder than a move, nothing exceeds a capture
+by much.
+
+The other half was that they RANG. The first set used pitched sinusoids
+decaying over a tenth of a second, which turns every move into a musical event.
+Measured, before and after:
+
+| cue | before | after |
+|---|---|---|
+| move | 100 ms audible, peak 0.72 | **66 ms, peak 0.34, centroid 1.1 kHz** |
+| capture | 150 ms, peak 0.72 | **94 ms, peak 0.46** |
+| pick-up | 40 ms, peak 0.72 | **26 ms, peak 0.08** |
+| check | two-note rise, 300 ms | **knock plus one tone, 227 ms** |
+| win | four-note fanfare, 720 ms | **two notes, 767 ms decaying** |
+
+Three changes did it:
+
+- **The noise burst is low-passed now.** White noise is the sound of a hiss,
+  not of wood. Rolling it off a couple of kHz up with a one-pole filter is what
+  turns a "tss" into a "tok", and it was the single biggest improvement.
+- **Melodies came out.** Check was a two-note rise and the win a four-note
+  fanfare; both are charming once and grating by the third game. Check is a
+  harder knock with one tone laid over it, and the result cues are two notes.
+- **Decays are a third of what they were**, and the tests now assert the
+  *audible* length — time until the envelope falls below 1% of peak — rather
+  than the buffer length. A move must be over inside a tenth of a second.
+
+**The pieces are editable as SVG files, without a rebuild** (asked for
+2026-08-22). `src/piece_art.gd` resolves the set from `user://pieces/*.svg`,
+then `res://assets/pieces/*.svg`, then the built-in drawn artwork.
+
+- **Resolution is per PIECE, not per set.** Replacing only `wN.svg` gives you
+  your knight and the built-in everything else, because a half-finished set is
+  a normal state to be in while drawing one.
+- Filenames are the universal convention — `wK wQ wR wB wN wP` and the `b*`
+  equivalents — so any standard set (Cburnett's, for one) drops in unrenamed.
+- `--dump-pieces`, or `make chess-pieces`, writes the built-in artwork out as
+  twelve editable SVGs plus a README explaining them. The exported viewBox is
+  the fitted art box, so a replacement drawn against the same box needs no
+  transform. The installed binary understands the flag too.
+- **Dumping is deliberately NOT automatic on first run.** The files would then
+  shadow the built-in art forever, and a later improvement to the drawn set
+  would never reach anyone who had launched the game once.
+- SVGs are rasterised at bucketed sizes (48…384 px) at or above the size
+  actually drawn, so a piece is downscaled and never up. A bucket change clears
+  the cache; a resize inside a bucket costs nothing. A file that fails to
+  rasterise is dropped and that piece falls back, because a file the game
+  cannot read is worse than no file — it looks like the edit did nothing.
+- The same trap as the boot splash applies and is handled: `load_svg_from_string`
+  scales the file's OWN intrinsic size, so it is read at 1.0 first.
 
 **Chess got a polish pass** (2026-08-22): Bezier piece artwork, animation, and
 sound. All three were asked for together and all three turned out to be the

@@ -261,3 +261,64 @@ static func _closed(p: PackedVector2Array) -> PackedVector2Array:
 	if out.size() > 0:
 		out.append(out[0])
 	return out
+
+
+# ------------------------------------------------------------ SVG export
+
+## Filenames follow the convention every chess program uses — wK, bN and so on
+## — so a set dumped from here can be edited and dropped back, and so ANY
+## standard set (Cburnett's, for one) can be dropped in instead with no
+## renaming.
+const LETTER: Dictionary = {
+	KING: "K", QUEEN: "Q", ROOK: "R", BISHOP: "B", KNIGHT: "N", PAWN: "P",
+}
+
+const SVG_LIGHT: String = "#f4f4f2"
+const SVG_DARK: String = "#1f2126"
+const SVG_STROKE_WIDTH: float = 2.2
+
+
+static func file_name(type: int, white: bool) -> String:
+	return "%s%s.svg" % ["w" if white else "b", LETTER.get(type, "?")]
+
+
+static func to_svg(type: int, white: bool) -> String:
+	## The built-in artwork as an editable SVG file, in a viewBox that is the
+	## fitted art box — so a replacement drawn against the same box lands on
+	## the same squares without anyone having to work out the transform.
+	if not PIECES.has(type):
+		return ""
+	var spec: Dictionary = PIECES[type]
+	var art: Vector2 = ART_MAX - ART_MIN
+	var fill: String = SVG_LIGHT if white else SVG_DARK
+	var edge: String = SVG_DARK if white else SVG_LIGHT
+	var body: PackedStringArray = PackedStringArray()
+	for d: String in spec["fills"]:
+		body.append('  <path d="%s" fill="%s" stroke="%s" stroke-width="%.1f" stroke-linejoin="round"/>'
+				% [_shift(d, -ART_MIN), fill, edge, SVG_STROKE_WIDTH])
+	for d: String in spec["strokes"]:
+		body.append('  <path d="%s" fill="none" stroke="%s" stroke-width="%.1f" stroke-linecap="round" stroke-linejoin="round"/>'
+				% [_shift(d, -ART_MIN), edge, SVG_STROKE_WIDTH])
+	for dot: Array in spec["dots"]:
+		var c: Vector2 = Vector2(dot[0]) - ART_MIN
+		body.append('  <circle cx="%.2f" cy="%.2f" r="%.2f" fill="%s"/>'
+				% [c.x, c.y, float(dot[1]), edge])
+	return ('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %.0f %.0f">\n'
+			% [int(art.x) * 4, int(art.y) * 4, art.x, art.y]) + "\n".join(body) + "\n</svg>\n"
+
+
+static func _shift(d: String, by: Vector2) -> String:
+	## Rewrites path data through a translation, leaving the commands intact.
+	var out: PackedStringArray = PackedStringArray()
+	var tokens: PackedStringArray = d.replace(",", " ").split(" ", false)
+	var i: int = 0
+	while i < tokens.size():
+		var t: String = tokens[i]
+		if t == "M" or t == "L" or t == "C" or t == "Q" or t == "Z":
+			out.append(t)
+			i += 1
+			continue
+		var pt: Vector2 = Vector2(t.to_float(), tokens[i + 1].to_float()) + by
+		out.append("%.2f %.2f" % [pt.x, pt.y])
+		i += 2
+	return " ".join(out)

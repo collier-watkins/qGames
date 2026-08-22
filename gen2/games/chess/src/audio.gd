@@ -74,51 +74,67 @@ func set_enabled(on: bool) -> void:
 # --------------------------------------------------------------- the cue list
 
 func _build_all() -> void:
-	# A piece set down: a knock with two body resonances, gone in 90 ms.
-	_streams[MOVE] = _knock(0.10, [[430.0, 0.55, 0.030], [1180.0, 0.22, 0.016]], 0.42, 0.006)
-	# A capture is the same knock lower and harder — one piece displacing
-	# another, not one piece landing.
-	_streams[CAPTURE] = _knock(0.26, [[196.0, 0.62, 0.055], [520.0, 0.30, 0.028],
-			[1450.0, 0.14, 0.012]], 0.60, 0.010)
+	# A piece set down. Dry and dark: the ring is gone in about twenty
+	# milliseconds and there is no note in it at all. The first version rang
+	# for a tenth of a second on pitched sinusoids, which turns every move into
+	# a musical event and is exactly what makes a move sound annoying by the
+	# thirtieth time you hear it.
+	_streams[MOVE] = _knock(0.09, [[300.0, 0.55, 0.016], [640.0, 0.30, 0.010],
+			[1250.0, 0.12, 0.006]], 0.70, 0.0035, 2400.0, 0.34)
+	# A capture is the same event lower, harder and a shade longer — one piece
+	# displacing another rather than one piece landing.
+	_streams[CAPTURE] = _knock(0.13, [[190.0, 0.60, 0.024], [430.0, 0.35, 0.014],
+			[900.0, 0.18, 0.008]], 0.90, 0.005, 3000.0, 0.46)
 	# Castling is two pieces, so it is two knocks. The gap is what says "that
 	# was one move, and two things moved".
 	_streams[CASTLE] = _sequence([
-		[0.000, _knock(0.10, [[430.0, 0.50, 0.030], [1180.0, 0.20, 0.016]], 0.40, 0.006)],
-		[0.085, _knock(0.10, [[360.0, 0.45, 0.032], [990.0, 0.18, 0.016]], 0.36, 0.006)],
-	], 0.20)
-	# Check is the only cue that is a note rather than a knock — it is
-	# information, not an event on the board, and it has to cut through.
-	_streams[CHECK] = _tones(0.52, [[0.00, 659.25, 0.34, 0.10], [0.09, 987.77, 0.30, 0.10]])
-	_streams[PROMOTE] = _tones(0.78, [
-		[0.00, 523.25, 0.26, 0.11], [0.09, 659.25, 0.26, 0.11],
-		[0.18, 783.99, 0.28, 0.13],
-	])
-	# A tick, not a click: the same knock at a tenth of the level and a third
-	# of the length. Picking a piece up should be felt more than heard.
-	_streams[SELECT] = _knock(0.04, [[760.0, 0.16, 0.010]], 0.10, 0.003)
-	_streams[ILLEGAL] = _knock(0.24, [[132.0, 0.42, 0.050], [176.0, 0.22, 0.040]], 0.14, 0.014)
-	_streams[WIN] = _tones(1.30, [
-		[0.00, 523.25, 0.26, 0.13], [0.10, 659.25, 0.26, 0.13],
-		[0.20, 783.99, 0.26, 0.13], [0.30, 1046.50, 0.30, 0.22],
-	])
-	# Falling, and minor, but not funereal — a child loses most of these games
-	# and the sound has to stay friendly.
-	_streams[LOSS] = _tones(1.16, [
-		[0.00, 587.33, 0.24, 0.14], [0.12, 493.88, 0.24, 0.14],
-		[0.24, 392.00, 0.26, 0.20],
-	])
-	_streams[DRAW] = _tones(0.92, [
-		[0.00, 523.25, 0.24, 0.14], [0.13, 523.25, 0.24, 0.17],
-	])
+		[0.000, _knock(0.09, [[300.0, 0.55, 0.016], [640.0, 0.28, 0.010]], 0.70, 0.0035, 2400.0, 0.40)],
+		[0.070, _knock(0.09, [[250.0, 0.50, 0.017], [540.0, 0.26, 0.010]], 0.65, 0.0035, 2200.0, 0.36)],
+	], 0.17, 0.42)
+	# Check is a harder, brighter knock with one short tone on top. It is NOT a
+	# tune: a two-note rise on every check is the thing you notice first and
+	# resent soonest.
+	_streams[CHECK] = _layer(0.24, [
+		[0.00, _knock(0.10, [[520.0, 0.55, 0.014], [1100.0, 0.30, 0.008]], 0.85, 0.003, 4000.0, 0.60)],
+		[0.01, _tones(0.22, [[0.00, 880.00, 0.30, 0.055]], 0.45)],
+	], 0.44)
+	# Promotion is the one move that deserves a note, and gets exactly two.
+	_streams[PROMOTE] = _layer(0.34, [
+		[0.00, _knock(0.09, [[420.0, 0.45, 0.014]], 0.55, 0.003, 3000.0, 0.40)],
+		[0.01, _tones(0.32, [[0.00, 659.25, 0.28, 0.06], [0.08, 1046.50, 0.30, 0.10]], 0.50)],
+	], 0.44)
+	# A tick, not a click — and quiet enough to be felt rather than heard.
+	# chess.com has no pick-up sound at all; this one earns its place only on a
+	# touchscreen, where nothing else confirms that the finger landed.
+	_streams[SELECT] = _knock(0.03, [[900.0, 0.20, 0.006]], 0.30, 0.002, 3500.0, 0.10)
+	_streams[ILLEGAL] = _knock(0.14, [[120.0, 0.50, 0.030], [152.0, 0.25, 0.020]],
+			0.25, 0.008, 800.0, 0.30)
+	# Two notes, not four. A fanfare is charming once and long by the third
+	# game in a row.
+	_streams[WIN] = _tones(0.82, [
+		[0.00, 659.25, 0.30, 0.09], [0.11, 987.77, 0.30, 0.15],
+	], 0.46)
+	# Falling, but not funereal — a child loses most of these games and the
+	# sound has to stay friendly.
+	_streams[LOSS] = _tones(0.82, [
+		[0.00, 523.25, 0.30, 0.09], [0.11, 392.00, 0.30, 0.15],
+	], 0.42)
+	_streams[DRAW] = _tones(0.78, [
+		[0.00, 523.25, 0.28, 0.09], [0.11, 523.25, 0.28, 0.14],
+	], 0.40)
 
 
 # ------------------------------------------------------------------ synthesis
 
 static func _knock(seconds: float, modes: Array, noise_amp: float,
-		noise_decay: float) -> AudioStreamWAV:
+		noise_decay: float, noise_cutoff: float, level: float) -> AudioStreamWAV:
 	## `modes` is [[hz, amplitude, decay_seconds], ...] — the resonances. The
 	## noise burst is the strike itself and dies far faster than the body does,
 	## which is the whole difference between a knock and a beep.
+	##
+	## The noise is LOW-PASSED. White noise is the sound of a hiss, not of wood;
+	## rolling it off a couple of kHz up is what turns a "tss" into a "tok" and
+	## was the single biggest change when these were made less irritating.
 	var n: int = int(seconds * MIX_RATE)
 	var samples: PackedFloat32Array = PackedFloat32Array()
 	samples.resize(n)
@@ -127,16 +143,21 @@ static func _knock(seconds: float, modes: Array, noise_amp: float,
 	# instrument.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 0x5EED
+	# One-pole low pass, the cheapest filter there is and enough here: the
+	# excitation only has to lose its top end, not be shaped.
+	var a: float = 1.0 - exp(-TAU * noise_cutoff / MIX_RATE)
+	var lp: float = 0.0
 	for i in n:
 		var t: float = float(i) / MIX_RATE
-		var v: float = noise_amp * rng.randf_range(-1.0, 1.0) * exp(-t / noise_decay)
+		lp += a * (rng.randf_range(-1.0, 1.0) - lp)
+		var v: float = noise_amp * lp * exp(-t / noise_decay)
 		for m: Array in modes:
 			v += float(m[1]) * exp(-t / float(m[2])) * sin(TAU * float(m[0]) * t)
 		samples[i] = v
-	return _finish(samples)
+	return _finish(samples, level)
 
 
-static func _tones(seconds: float, notes: Array) -> AudioStreamWAV:
+static func _tones(seconds: float, notes: Array, level: float) -> AudioStreamWAV:
 	## `notes` is [[start_seconds, hz, amplitude, decay_seconds], ...]. Each is
 	## a plucked sine with a touch of second harmonic — a pure sine reads as a
 	## test tone, and the harmonic is what makes it a note.
@@ -153,11 +174,11 @@ static func _tones(seconds: float, notes: Array) -> AudioStreamWAV:
 			var env: float = exp(-t / decay)
 			if env < 0.0005:
 				break
-			samples[i] += amp * env * (sin(TAU * hz * t) + 0.25 * sin(TAU * hz * 2.0 * t))
-	return _finish(samples)
+			samples[i] += amp * env * (sin(TAU * hz * t) + 0.15 * sin(TAU * hz * 2.0 * t))
+	return _finish(samples, level)
 
 
-static func _sequence(parts: Array, seconds: float) -> AudioStreamWAV:
+static func _sequence(parts: Array, seconds: float, level: float) -> AudioStreamWAV:
 	## Lays already-rendered cues onto one timeline: [[start_seconds, wav], ...].
 	var n: int = int(seconds * MIX_RATE)
 	var samples: PackedFloat32Array = PackedFloat32Array()
@@ -170,12 +191,24 @@ static func _sequence(parts: Array, seconds: float) -> AudioStreamWAV:
 			if j >= n:
 				break
 			samples[j] += src[i]
-	return _finish(samples)
+	return _finish(samples, level)
 
 
-## Peak the finished buffer to this. Headroom below 1.0 because these are
-## summed with nothing and clipped by everything — and because a game for
-## children should not be the loudest thing on the machine.
+## `_layer` is `_sequence` by another name and exists only to read correctly at
+## the call site: sequencing says "then", layering says "at the same time".
+static func _layer(seconds: float, parts: Array, level: float) -> AudioStreamWAV:
+	return _sequence(parts, seconds, level)
+
+
+## Ceiling on any cue. Headroom below 1.0 because these are clipped by
+## everything downstream, and because a game for children should not be the
+## loudest thing on the machine.
+##
+## Each cue is peaked to its OWN level rather than to this. Normalising them
+## all to one number was a mistake worth recording: it made the pick-up tick
+## exactly as loud as the win chime, so the sounds you hear forty times a game
+## were as prominent as the one you hear once. Half of "the sounds are
+## annoying" was mixing, not synthesis.
 const PEAK: float = 0.72
 ## Fades at the ends. A buffer that starts or ends on a non-zero sample makes
 ## an audible tick on its own, which would put a click in front of every click.
@@ -187,12 +220,13 @@ const FADE_IN_SEC: float = 0.0005
 const FADE_OUT_SEC: float = 0.004
 
 
-static func _finish(samples: PackedFloat32Array) -> AudioStreamWAV:
+static func _finish(samples: PackedFloat32Array, level: float) -> AudioStreamWAV:
 	var n: int = samples.size()
 	var peak: float = 0.0
 	for v in samples:
 		peak = maxf(peak, absf(v))
-	var gain: float = (PEAK / peak) if peak > 0.0001 else 0.0
+	var target: float = minf(level, PEAK)
+	var gain: float = (target / peak) if peak > 0.0001 else 0.0
 	var fade_in: int = maxi(1, int(FADE_IN_SEC * MIX_RATE))
 	var fade_out: int = maxi(1, int(FADE_OUT_SEC * MIX_RATE))
 	var data := PackedByteArray()

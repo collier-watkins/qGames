@@ -72,7 +72,22 @@ var _audio: ChessAudio = null
 var _pref_sound: bool = true
 
 
+## Command-line switch, honoured in an exported build as well as in the editor.
+## A menu entry for this would be a developer control in a child's game; a flag
+## is discoverable by exactly the person who wants it.
+const DUMP_PIECES_FLAG: String = "--dump-pieces"
+
+
 func _game_ready() -> void:
+	if _wanted(DUMP_PIECES_FLAG):
+		var where: String = ChessPieceArt.dump_builtin()
+		if where == "":
+			push_error("chess: could not write the piece set")
+		else:
+			print("chess: wrote the piece set to ", where)
+			print("chess: edit the .svg files there and restart — nothing to rebuild")
+		quit_game()
+		return
 	_load_prefs()
 	_game = G.new()
 	_opponent = O.new()
@@ -91,6 +106,10 @@ func _game_ready() -> void:
 	resized.connect(_relayout)
 	_relayout()
 	_show_setup()
+
+
+func _wanted(flag: String) -> bool:
+	return OS.get_cmdline_args().has(flag) or OS.get_cmdline_user_args().has(flag)
 
 
 func _exit_tree() -> void:
@@ -658,7 +677,8 @@ func _show_promotion() -> void:
 		# The pieces are drawn, not lettered: a child choosing a promotion has
 		# to recognise the shape, and "N" means nothing to them.
 		b.draw.connect(func() -> void:
-			ChessPieces.draw_piece(b, type, Rect2(Vector2.ZERO, b.size).grow(-10),
+			_board_view.art.draw(b, type if white else -type,
+					Rect2(Vector2.ZERO, b.size).grow(-10),
 					ChessBoardView.C_PIECE_WHITE if white else ChessBoardView.C_PIECE_BLACK,
 					ChessBoardView.C_PIECE_BLACK if white else ChessBoardView.C_PIECE_WHITE))
 		b.pressed.connect(func() -> void: _finish_promotion(type))

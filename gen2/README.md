@@ -28,6 +28,7 @@ make test GAME=memory      # headless unit tests
 make export-linux GAME=memory
 make export-arm64 GAME=memory
 make new-game NAME=foo
+make chess-pieces          # dump chess's pieces as editable SVGs
 ```
 
 Editing is text-first: `.gd`, `.tscn`, `.tres` and `project.godot` are all

@@ -20,7 +20,8 @@ GAMES_LIST  = $(if $(GAMES),$(GAMES),(none found under games/*/project.godot))
 .DEFAULT_GOAL := help
 
 .PHONY: help _check-game import run test test-all export-linux export-arm64 export-all \
-        dist dist-tar deploy install uninstall bake bake-clean version release new-game clean
+        dist dist-tar deploy install uninstall bake bake-clean version release new-game \
+        chess-pieces clean
 
 help:
 >@echo "qGames2 — available targets:"
@@ -32,6 +33,7 @@ help:
 >@echo "  make export-arm64  GAME=<name>                export 'Linux arm64' into dist/"
 >@echo "  make export-all                               export both arches, every game"
 >@echo "  make new-game      NAME=<name> [TITLE=\"Display Name\"]     scaffold a new game"
+>@echo "  make chess-pieces                            dump chess's pieces as editable SVGs"
 >@echo "  make clean                                    remove dist/ and games/*/.godot/"
 >@echo ""
 >@echo "Discovered games: $(GAMES_LIST)"
@@ -129,6 +131,14 @@ uninstall:
 
 export-all:
 >@games="$(GAMES)"; if [ -z "$$games" ]; then echo "no games found under games/*/project.godot"; exit 0; fi; status=0; for g in $$games; do mkdir -p "dist/$$g"; echo "== export: $$g (Linux x86_64) =="; $(GODOT) --headless --path "games/$$g" --export-release "Linux x86_64" "$(ROOT)/dist/$$g/$$g-x86_64" || status=1; echo "== export: $$g (Linux arm64) =="; $(GODOT) --headless --path "games/$$g" --export-release "Linux arm64" "$(ROOT)/dist/$$g/$$g-arm64" || status=1; done; exit $$status
+
+# Write the built-in chess piece set out as twelve editable SVG files, into the
+# game's own user directory. Edit them in any vector editor and restart; there
+# is nothing to rebuild. Delete a file and that piece falls back to the drawn
+# one. The installed binary understands the same flag:
+#     ~/.local/share/qgames/chess/chess --dump-pieces
+chess-pieces:
+>$(GODOT) --headless --path games/chess -- --dump-pieces
 
 new-game:
 ># NOTE: the variable is TITLE, not DISPLAY — Make imports the environment,
