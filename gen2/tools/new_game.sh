@@ -76,11 +76,28 @@ func _initialize() -> void:
 	f.close()
 
 	var icon := Image.new()
-	if icon.load_svg_from_string(svg, float(ICON) / 256.0) != OK:
+	# The scale is derived from the icon's OWN intrinsic size, not assumed.
+	# Hardcoding "icons are 256px" rasterises a 512px icon at 1024 and then
+	# blends only its top-left quarter into the canvas — a visibly wrong splash
+	# with no error anywhere, which is exactly what a 512px chess icon produced.
+	if icon.load_svg_from_string(svg, 1.0) != OK:
 		push_error("could not rasterise res://icon.svg")
 		quit(1)
 		return
+	var natural: float = float(maxi(icon.get_width(), icon.get_height()))
+	if natural <= 0.0:
+		push_error("res://icon.svg has no intrinsic size")
+		quit(1)
+		return
+	if icon.load_svg_from_string(svg, float(ICON) / natural) != OK:
+		push_error("could not rasterise res://icon.svg at splash size")
+		quit(1)
+		return
 	icon.convert(Image.FORMAT_RGBA8)
+	# Rounding in the rasteriser can land a pixel either side of ICON; the
+	# blend below takes a fixed ICON x ICON rect and would crop or pad silently.
+	if icon.get_width() != ICON or icon.get_height() != ICON:
+		icon.resize(ICON, ICON, Image.INTERPOLATE_LANCZOS)
 
 	# Image.fill() TRUNCATES float channels to 8 bits, while the renderer's clear
 	# of bg_color rounds — so filling with bg_color verbatim lands one value
