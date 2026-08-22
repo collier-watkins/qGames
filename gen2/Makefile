@@ -21,7 +21,7 @@ GAMES_LIST  = $(if $(GAMES),$(GAMES),(none found under games/*/project.godot))
 
 .PHONY: help _check-game import run test test-all export-linux export-arm64 export-all \
         dist dist-tar deploy install uninstall bake bake-clean version release new-game \
-        chess-pieces clean
+        chess-pieces chess-pieces-repo clean
 
 help:
 >@echo "qGames2 — available targets:"
@@ -34,6 +34,7 @@ help:
 >@echo "  make export-all                               export both arches, every game"
 >@echo "  make new-game      NAME=<name> [TITLE=\"Display Name\"]     scaffold a new game"
 >@echo "  make chess-pieces                            dump chess's pieces as editable SVGs"
+>@echo "  make chess-pieces-repo                       ...into the repo, tracked and shipped"
 >@echo "  make clean                                    remove dist/ and games/*/.godot/"
 >@echo ""
 >@echo "Discovered games: $(GAMES_LIST)"
@@ -139,6 +140,15 @@ export-all:
 #     ~/.local/share/qgames/chess/chess --dump-pieces
 chess-pieces:
 >$(GODOT) --headless --path games/chess -- --dump-pieces
+
+# The same set, written into the REPOSITORY instead, where it is tracked by git
+# and ships inside every build — including Android, which has no convenient user
+# directory. Writes the .import stubs the files need: .svg has an importer, so
+# without them the source text is stripped from the pack and the set works in
+# the editor while being silently absent from every export.
+chess-pieces-repo:
+>$(GODOT) --headless --path games/chess -- --dump-pieces=res://assets/pieces
+>@echo "wrote games/chess/assets/pieces/ — commit it to ship the set"
 
 new-game:
 ># NOTE: the variable is TITLE, not DISPLAY — Make imports the environment,

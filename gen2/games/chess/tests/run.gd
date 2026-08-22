@@ -840,3 +840,52 @@ func _test_piece_set_files() -> void:
 			"bK.svg", "bQ.svg", "bR.svg", "bB.svg", "bN.svg", "bP.svg", "README.txt"]:
 		DirAccess.remove_absolute(dir.path_join(name))
 	DirAccess.remove_absolute(dir)
+
+	_test_repo_piece_set_ships()
+
+
+func _test_repo_piece_set_ships() -> void:
+	## A piece set committed under res://assets/pieces has to survive the
+	## export, and the way it fails is silent: .svg HAS an importer, so
+	## `export_filter="all_resources"` exports the TEXTURE and strips the
+	## source text the game actually reads. It then works perfectly in the
+	## editor and is missing from every shipped build.
+	##
+	## Two things have to be true, and both were established by grepping an
+	## export for a path fragment rather than by trusting that it worked:
+	## each file needs `importer="keep"`, and include_filter has to name them.
+	## Neither is enough on its own.
+	if FileAccess.file_exists("res://export_presets.cfg"):
+		var text: String = FileAccess.open("res://export_presets.cfg",
+				FileAccess.READ).get_as_text()
+		# Line by line, not a whole-file count: the explanatory comment above
+		# the presets mentions the same pattern and made a naive count wrong.
+		var presets: int = 0
+		var named: int = 0
+		for line: String in text.split("\n"):
+			if not line.begins_with("include_filter="):
+				continue
+			presets += 1
+			if line.contains("assets/pieces/*.svg"):
+				named += 1
+		_check("every export preset carries the piece set through include_filter",
+				presets > 0 and named == presets)
+
+	# There is no set committed today; this guard fires the moment one is added
+	# without its stubs, which is the only moment it could go wrong.
+	var dir: DirAccess = DirAccess.open("res://assets/pieces")
+	if dir == null:
+		_check("no repository piece set is committed, so none can be stripped", true)
+		return
+	var all_kept: bool = true
+	for name: String in dir.get_files():
+		if not name.ends_with(".svg"):
+			continue
+		var stub: String = "res://assets/pieces/%s.import" % name
+		if not FileAccess.file_exists(stub):
+			all_kept = false
+			continue
+		if not FileAccess.open(stub, FileAccess.READ).get_as_text().contains("importer=\"keep\""):
+			all_kept = false
+	_check("every committed piece file is marked keep, or it is stripped from the export",
+			all_kept)

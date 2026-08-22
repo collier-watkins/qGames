@@ -165,8 +165,8 @@ returns to scope).
 
 ## Current state
 
-**Five games built, all tests green** (2026-08-22): chess 188/188, memory 74/74,
-notes 332/332, paint 56/56, sequence 27/27 — 677 tests, 0 failures.
+**Five games built, all tests green** (2026-08-22): chess 190/190, memory 74/74,
+notes 332/332, paint 56/56, sequence 27/27 — 679 tests, 0 failures.
 
 The project began as a spike — port `memory` (the old suite's smallest game, 281
 lines) to prove the workflow before committing to a full rewrite. The spike's
@@ -232,6 +232,39 @@ then `res://assets/pieces/*.svg`, then the built-in drawn artwork.
   cannot read is worse than no file — it looks like the edit did nothing.
 - The same trap as the boot splash applies and is handled: `load_svg_from_string`
   scales the file's OWN intrinsic size, so it is read at 1.0 first.
+
+⚠ **A repository piece set does not survive an export without help**, and the
+way it fails is silent. `res://assets/pieces/*.svg` was supported from the
+start of this feature and was BROKEN: `.svg` has an importer, so
+`export_filter="all_resources"` exports the imported TEXTURE and strips the
+source text — which is the thing the game actually reads. It works perfectly
+in the editor and is absent from every shipped build.
+
+`include_filter` does not rescue it on its own; naming the files there was
+tried, in three syntaxes, and the bytes still were not in the pack. Each file
+also needs a `.import` containing `importer="keep"`, which is what makes the
+engine treat it as plain bytes. BOTH are required. All of this was established
+by grepping an export for a path fragment and then by reading the resolved set
+out of a running exported binary — `chess: pieces currently from
+res://assets/pieces (12 of 12)`.
+
+`make chess-pieces-repo` writes the set with its stubs. `make chess-pieces`
+writes it to `user://` and deliberately does not, because a user set is not
+packed and stubs there would be litter. A test asserts every export preset
+names the files and that any committed `.svg` has its keep stub, since that is
+the only moment it can go wrong.
+
+**No piece set is committed today, on purpose.** The built-in artwork's single
+source of truth is the path data in `src/pieces.gd`; committing an identical
+set of SVGs would duplicate it and then silently WIN over it, so a later
+improvement to the drawn set would never be seen. The mechanism is there and
+verified for a set somebody actually draws.
+
+**Getting output out of an exported build needs a clean exit.** Godot flushes
+stdout on exit, so a release binary killed mid-run prints nothing at all — a
+plain `timeout 10 ./chess` produced an empty log and looked like the print had
+been stripped. `--dump-pieces` reports the resolved set before it quits, which
+is what made this observable.
 
 **Chess got a polish pass** (2026-08-22): Bezier piece artwork, animation, and
 sound. All three were asked for together and all three turned out to be the

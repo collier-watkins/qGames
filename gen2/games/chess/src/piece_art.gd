@@ -135,11 +135,32 @@ func _texture(name: String) -> Texture2D:
 
 # ---------------------------------------------------------------- exporting
 
-static func dump_builtin(path: String = USER_DIR) -> String:
+## A Godot import stub that tells the engine to leave a file alone.
+##
+## This exists because of a trap that costs a shipped feature silently.
+## `export_filter="all_resources"` means imported RESOURCES, and .svg HAS an
+## importer — so a piece set under res:// is exported as a texture and its
+## SOURCE TEXT is stripped. The art is read as text and rasterised at the size
+## actually drawn, so a texture is no use, and `FileAccess.get_as_text` finds
+## nothing in a shipped build while working perfectly in the editor.
+## `include_filter` does NOT rescue it: naming the files there was tried and
+## the bytes still were not in the pack. VERIFIED both ways by grepping an
+## export for a path fragment.
+##
+## `importer="keep"` is what makes the engine treat the file as plain bytes,
+## and then include_filter carries it into the pack.
+const KEEP_IMPORT: String = "[remap]\n\nimporter=\"keep\"\n"
+
+
+static func dump_builtin(path: String = USER_DIR, keep_stubs: bool = false) -> String:
 	## Writes the built-in set out as twelve editable SVG files plus a note
 	## saying what they are. Returns the absolute directory, or "" on failure.
 	##
-	## This is deliberately NOT done automatically on first run: the files
+	## `keep_stubs` writes a .import beside each file and is for a set that
+	## will live in the REPOSITORY under res://. Without it that set works in
+	## the editor and is missing from every export.
+	##
+	## Dumping is deliberately NOT done automatically on first run: the files
 	## would then shadow the built-in art forever, and a later improvement to
 	## the drawn set would never reach anyone who had launched the game once.
 	if DirAccess.make_dir_recursive_absolute(path) != OK:
@@ -153,6 +174,12 @@ static func dump_builtin(path: String = USER_DIR) -> String:
 				return ""
 			f.store_string(ChessPieces.to_svg(type, white))
 			f.close()
+			if keep_stubs:
+				var stub: FileAccess = FileAccess.open(
+						path.path_join(name + ".import"), FileAccess.WRITE)
+				if stub != null:
+					stub.store_string(KEEP_IMPORT)
+					stub.close()
 	var readme: FileAccess = FileAccess.open(path.path_join("README.txt"), FileAccess.WRITE)
 	if readme != null:
 		readme.store_string(README)
@@ -168,6 +195,11 @@ restart the game; there is nothing to rebuild and nothing to install.
 
   wK wQ wR wB wN wP   white king, queen, rook, bishop, knight, pawn
   bK bQ bR bB bN bP   the same in black
+
+To keep a set under version control and ship it inside every build, put it in
+the repository at games/chess/assets/pieces/ instead — `make chess-pieces-repo`
+writes it there with the .import stubs it needs. Without those stubs the set
+works in the editor and is silently missing from every exported build.
 
 Delete a file and that piece falls back to the one drawn in code, so you can
 replace them one at a time. Delete all of them and you get the built-in set

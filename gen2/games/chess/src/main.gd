@@ -79,8 +79,19 @@ const DUMP_PIECES_FLAG: String = "--dump-pieces"
 
 
 func _game_ready() -> void:
-	if _wanted(DUMP_PIECES_FLAG):
-		var where: String = ChessPieceArt.dump_builtin()
+	var dump_to: String = _flag_value(DUMP_PIECES_FLAG)
+	if dump_to != "":
+		# A set written into the repository needs the .import stubs; one
+		# written to user:// does not and should not have them.
+		var repo: bool = dump_to.begins_with("res://")
+		# Report which set is CURRENTLY in use as well. It is the question
+		# anyone running this flag is about to ask, and it is the only way to
+		# see the answer from an exported build: stdout is flushed on exit, so
+		# a game killed mid-run prints nothing at all.
+		var current := ChessPieceArt.new()
+		current.load_set()
+		print("chess: pieces currently from ", current.source)
+		var where: String = ChessPieceArt.dump_builtin(dump_to, repo)
 		if where == "":
 			push_error("chess: could not write the piece set")
 		else:
@@ -108,8 +119,18 @@ func _game_ready() -> void:
 	_show_setup()
 
 
-func _wanted(flag: String) -> bool:
-	return OS.get_cmdline_args().has(flag) or OS.get_cmdline_user_args().has(flag)
+func _flag_value(flag: String) -> String:
+	## Returns the flag's argument, the default when the bare flag is given, or
+	## "" when it is absent. Both `--flag` and `--flag=value` are accepted, and
+	## both the engine's argument list and the user's are searched — an
+	## exported binary puts them in different places.
+	var args: PackedStringArray = OS.get_cmdline_args() + OS.get_cmdline_user_args()
+	for a: String in args:
+		if a == flag:
+			return ChessPieceArt.USER_DIR
+		if a.begins_with(flag + "="):
+			return a.substr(flag.length() + 1)
+	return ""
 
 
 func _exit_tree() -> void:
@@ -154,6 +175,9 @@ func _save_prefs() -> void:
 
 func _build_ui() -> void:
 	_board_view = ChessBoardView.new()
+	# Which artwork is in use is the first thing to establish about a
+	# screenshot, so it is said out loud rather than left to be worked out.
+	print("chess: pieces from ", _board_view.art.source)
 	_board_view.move_attempted.connect(_on_move_attempted)
 	_board_view.square_touched.connect(_on_square_touched)
 	add_child(_board_view)
