@@ -165,10 +165,8 @@ returns to scope).
 
 ## Current state
 
-**Three games built, all tests green** (2026-08-21): memory 43/43, notes 130/130,
-sequence 27/27 — 200 tests, 0 failures. Nothing is committed for `notes` or
-`sequence`; both are untracked in the working tree, alongside edits to
-`PROJECT_STATE.md`, `mqtt.yaml` and `tools/new_game.sh`.
+**Five games built, all tests green** (2026-08-22): chess 144/144, memory 74/74,
+notes 332/332, paint 56/56, sequence 27/27 — 633 tests, 0 failures.
 
 The project began as a spike — port `memory` (the old suite's smallest game, 281
 lines) to prove the workflow before committing to a full rewrite. The spike's
@@ -176,6 +174,164 @@ questions are now answered except one: the code-first loop holds up across three
 games of different shapes, keypad-plus-touch works on all three, GDScript suits
 the work, and the Linux x86_64 and arm64 exports come out clean. **Android is
 still unanswered** — the SDK is not installed, so no APK has ever been built.
+
+**Fifth game, new: `chess`** (2026-08-22). A full game of chess against the
+machine, with a clock, a move list, takeback and hints. Every rule is
+implemented, including the ones people forget: castling and all three ways it
+is forbidden, en passant including the pin that makes it illegal, promotion to
+any of four pieces, the fifty-move rule, threefold repetition, dead positions,
+and a flag fall against bare material being a draw rather than a win.
+
+**The opponent is written in GDScript, and Stockfish is deliberately not
+bundled.** The decision was made on measurements taken before any of it was
+written, not on preference:
+
+- A naive 0x88 move generator in GDScript runs **~190k nodes/sec** on this box.
+  With material-plus-piece-square evaluation, MVV-LVA ordering, killers,
+  history and a quiescence search it settles at **~60-70k nodes/sec** — the
+  extra work per node buys far more than it costs. From the start position that
+  is **depth 5 in 200 ms, depth 6 in one second** (measured), which is roughly
+  club strength and already stronger than anyone in this house.
+- Debian's Stockfish 16 is **33.5 MB packed, 39.5 MB installed, per
+  architecture**, because the NNUE net is embedded (measured from the apt
+  index). `dist/` is already ~810 MB across four games and four architectures.
+- Android is the harder half. `OS.execute_with_pipe` exists in 4.7.2 (VERIFIED
+  by ClassDB probe) and the docs list Android among its platforms, but since
+  API 29 a binary in app-writable storage cannot be executed at all — it would
+  have to ship as a jniLib inside a custom Gradle build, in a project that has
+  never built an APK. (That last point is inferred from the W^X rule, not
+  verified on a device.)
+
+So `src/uci.gd` speaks UCI over a pipe and is used **only if a Stockfish binary
+is already on the machine** and `chess/external_engine` is turned on. Nothing is
+bundled, nothing is downloaded, and the native search is the one that ships.
+
+**Correctness is established by perft, not by playing it.** `tests/run.gd`
+runs the six standard positions — start, Kiwipete, the rook-and-pawn endgame,
+the promotion position, the tactical position and the middlegame position — and
+compares node counts against the published values at depths 1-3, and depth 4
+where it is cheap enough:
+
+    startpos    20 / 400 / 8902 / 197281
+    kiwipete    48 / 2039 / 97862
+    endgame     14 / 191 / 2812 / 43238
+
+A move generator is either exactly right or quietly wrong, and these numbers are
+the only test that catches "quietly wrong". They are what proves castling
+through check, the en passant that exposes a king along a rank, and the
+underpromotion to a knight. Every one of the six also asserts the position is
+unchanged afterwards, which is what catches a broken unmake.
+
+**Legality is decided by make-and-test, not by pin detection.** Generating
+pseudo-legal moves and asking whether the king is attacked afterwards is slower
+than tracking pins during generation, and it is the version that cannot get en
+passant wrong: BOTH pawns leave the rank in one move, so a rook that pinned
+neither of them can end up giving check. There is a test for exactly that
+position, asserting the capture IS generated pseudo-legally and IS rejected as
+illegal — so it tests the filter rather than an absence.
+
+**The search runs on a worker Thread and is handed a FEN, never the board.**
+Two threads on one mutable position is the obvious way to corrupt it, and
+copying through FEN costs microseconds against a search measured in hundreds of
+milliseconds. The alternative, a time-sliced search on the main thread, was
+rejected because the deepest level wants two or three seconds and slicing that
+across frames means the board stops answering a child's finger while the
+machine thinks.
+
+**Difficulty is noise on the root scores, not a shallower search.** Each of the
+eight levels caps depth and time, and then adds a uniform random bonus of up to
+`noise` centipawns to every root move before the best is taken. A level made
+weak by searching one ply plays moves that are stupid in a boring, uniform way;
+a full search plus noise develops sensibly and then hangs a piece, which is
+what a human beginner does and what a child can learn to punish. Anything
+decisive — a mate found or a mate to be avoided, ±900 cp or more — is exempt,
+because a level that walks into mate at random reads as broken rather than
+weak, and one that MISSES a mate it has already found refuses to end the game.
+
+**The pieces are drawn in code.** Godot's default font carries none of the
+chess glyphs — VERIFIED, `Font.has_char()` is false across the whole
+U+2654..U+265F block on Open Sans SemiBold — and the system fonts that do have
+them (DejaVu, FreeSerif, Noto Sans Symbols 2) are present on this desktop and
+absent on Android, so depending on one would make the pieces vanish on a target
+we intend to ship to. Bundling a symbol font means a licence and half a
+megabyte for twelve glyphs. `src/pieces.gd` is polygons in a 100x100 box: no
+atlas, any square size, and the colour is an argument, which is what lets one
+knight serve as the board piece, the promotion button and `icon.svg`.
+
+A GDScript trap worth remembering: **`const X := PackedVector2Array([...])` is
+not a constant expression** and every such line fails to compile. The geometry
+is held as `const Array[Vector2]` and packed once per draw inside `_xf()`,
+which allocates exactly what it already allocated.
+
+**The game goes out as PGN in chess.com's shape**, RETAINED and FIRST, then the
+scalars, with `ts` last — the same ordering notes uses for a saved document.
+Headers are the seven-tag roster in its mandated order followed by
+`TimeControl`, `EndTime` and `Termination`, and every move carries
+`{[%clk H:MM:SS.t]}` with the mover's remaining time. VERIFIED on the wire
+against a real `eclipse-mosquitto:2` in Docker: the PGN arrived complete, the
+scalars followed, `ts` landed last, and a fresh subscriber replayed only
+`qGames/chess/pgn` and `qGames/chess/fen` — proving those two are retained and
+nothing else is. `Site` is "qGames Chess" and not chess.com; claiming a game
+was played somewhere it was not is the sort of small lie that makes an archive
+untrustworthy.
+
+`Termination` is plain language and is the same string the end card shows the
+player — "Player won by checkmate", "Game drawn by the 50-move rule". A child
+can be told that; `1/2-1/2` cannot.
+
+**Three layout defects, all surfaced by the reading size rather than caused by
+it** — the same lesson paint already paid for:
+
+1. The new-game dialog did not fit. At 1280x720 with the reading size at 1.6x
+   the logical viewport is 800x450, and a stacked dialog is taller than 450 —
+   the Start button was simply off the bottom of the screen, unreachable, with
+   nothing to say so. It is now three groups in an `HFlowContainer` that go
+   side by side when there is width and stack when there is not, inside a
+   `ScrollContainer` as the backstop.
+2. **An `HFlowContainer` reports the width of its WIDEST CHILD as its minimum**,
+   so inside a `CenterContainer` it always asks for one column and always
+   wraps to one. It will use extra width but never request it. The setup card
+   now sets `custom_minimum_size.x` to the width of the column count that fits.
+3. **An `HFlowContainer` reports the height of ONE row**, whatever it actually
+   wraps to, because width is not known when minimum sizes are asked for. The
+   panel's button row therefore got one row's worth of space and drew its
+   second row outside the panel. `get_line_count()` knows the answer once the
+   layout has run, so the minimum is corrected afterwards — every frame, because
+   a single deferred call after a resize can still read the pre-wrap answer.
+
+**A defect in `tools/new_game.sh`, found by using it.** The splash generator
+rasterised `icon.svg` at `ICON / 256.0`, hardcoding an assumption that every
+icon is 256px. A 512px icon was rasterised at 1024 and then only its top-left
+quarter was blended into the canvas — a visibly wrong splash with no error
+anywhere. The scale is now derived from the icon's own intrinsic size, and the
+result is resized if the rasteriser rounds it off by a pixel. The four existing
+icons are all 256px, so no other game was affected.
+
+**`tests/interactive.gd` drives the real game with real clicks and keys**, and
+is deliberately NOT in `make test-all`, which is headless. It covers the half
+the unit tests cannot: that a tap on a square selects a piece, that the
+keyboard cursor plays a move, that reviewing a past move makes the board
+read-only, that the promotion picker appears and promotes, and that resigning
+ends the game with the right sentence. It runs green at **1280x720, 1024x600
+and 720x1180, at reading sizes 0.7, 1.0, 1.6 and 2.4** — twelve combinations,
+which is how all three layout defects above were found.
+
+Two things it taught about testing Godot on this machine:
+
+- **Input events carry WINDOW pixels, not viewport coordinates.** The two
+  coincide only when the stretch scale is 1:1, which it was at 1280x720 — so
+  the conversion looked unnecessary until the window was made portrait and
+  every click missed. `Viewport.get_screen_transform()` is the conversion.
+- **A vsynced buffer swap blocks for about a second in this session.** Under
+  XWayland with nothing actually on screen the whole run drops to one frame per
+  second, which turns every wait into a hang; with `VSYNC_DISABLED` the same
+  run measures over a thousand frames a second. Waits in the test are therefore
+  wall-clock and not frame counts, because the frame rate here is not a
+  constant.
+
+Untested: Android, ARM hardware, and the external Stockfish path — no engine is
+installed on this box, so `src/uci.gd` has never spoken to one. The native
+search is what every test and every screenshot exercises.
 
 **Fourth game, new: `paint`** (2026-08-21). A drawing pad that saves PNGs.
 Three tools (brush, rubber, fill), twelve colours, four brush sizes, undo,
@@ -843,6 +999,23 @@ export, and the native Wayland display driver — every capture used
   so a pure function that needs testing has to live somewhere testable. The
   first version indexed one past the end when nothing needed cutting; its own
   test caught that.
+
+- **Chess: the external engine path has never run.** No Stockfish is installed
+  on this box, so `src/uci.gd` is written, compiled and unexercised. Turning it
+  on is `chess/external_engine=true` plus a binary on PATH or beside the game;
+  `chess/engine_path` names one explicitly. If it is ever used in anger, the
+  first thing to check is that a dead engine cannot hang the worker thread —
+  the read loop is bounded, but the bound has never been hit.
+- **Chess strength is estimated, not measured.** "Roughly club strength" comes
+  from depth and node rate, not from a match against rated opposition. Nobody
+  has played the eight levels against anything that could put a number on them,
+  and the noise values that separate them were chosen by argument. If they turn
+  out wrong the fix is one table in `src/opponent.gd`.
+- **Chess has no opening book.** At the top levels it plays the same first few
+  moves every game, because a deterministic search from a fixed position is
+  deterministic. The lower levels vary because of the noise; the higher ones do
+  not. A small book, or a few centipawns of noise applied only in the opening,
+  would fix it.
 
 - **Availability is unimplemented and deferred** (owner's call, 2026-08-20).
   Nothing tells Home Assistant whether a game is running; every sensor is "last

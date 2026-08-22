@@ -23,6 +23,10 @@
 # Games also publish their own historical topics (memory still emits `moves`)
 # for sensors that predate the common schema.
 #
+# Two games also publish a RETAINED body before their scalars — notes sends the
+# note itself, chess sends the game as PGN. Retained because a document or a
+# finished game is still current an hour later, where a reading would be stale.
+#
 # MQTT is ON by default for every game as of 2026-08-21. The broker and its
 # credentials come from the environment (MQTT_BROKER, MQTT_PORT, MQTT_USERNAME,
 # MQTT_PASSWORD — or the same names with a QGAMES_ prefix, which win) or from
@@ -174,6 +178,86 @@ mqtt:
       unique_id: "qgames2_notes_filename"
       state_topic: "qGames/notes/filename"
       icon: "mdi:file-document-outline"
+
+
+    # ── Chess ────────────────────────────────────────────────────────────────
+    - name: "qGames Chess Last Played"
+      unique_id: "qgames2_chess_ts"
+      state_topic: "qGames/chess/ts"
+      value_template: "{{ value | int | timestamp_local }}"
+      icon: "mdi:clock-outline"
+
+    - name: "qGames Chess Result"
+      unique_id: "qgames2_chess_result"
+      state_topic: "qGames/chess/result"
+      icon: "mdi:trophy"
+
+    - name: "qGames Chess Score"
+      unique_id: "qgames2_chess_score"
+      state_topic: "qGames/chess/score"
+      icon: "mdi:chess-pawn"
+
+    - name: "qGames Chess Score Unit"
+      unique_id: "qgames2_chess_score_unit"
+      state_topic: "qGames/chess/score_unit"
+      icon: "mdi:tag-outline"
+
+    - name: "qGames Chess Duration"
+      unique_id: "qgames2_chess_duration"
+      state_topic: "qGames/chess/duration_s"
+      unit_of_measurement: "s"
+      device_class: duration
+      icon: "mdi:timer-outline"
+
+    # Game-specific topics.
+    - name: "qGames Chess Termination"
+      unique_id: "qgames2_chess_termination"
+      state_topic: "qGames/chess/termination"
+      icon: "mdi:flag-checkered"
+
+    - name: "qGames Chess Difficulty"
+      unique_id: "qgames2_chess_level_name"
+      state_topic: "qGames/chess/level_name"
+      icon: "mdi:speedometer"
+
+    - name: "qGames Chess Played As"
+      unique_id: "qgames2_chess_played_as"
+      state_topic: "qGames/chess/played_as"
+      icon: "mdi:chess-king"
+
+    - name: "qGames Chess Time Control"
+      unique_id: "qgames2_chess_time_control"
+      state_topic: "qGames/chess/time_control"
+      icon: "mdi:timer-sand"
+
+    - name: "qGames Chess PGN Result"
+      unique_id: "qgames2_chess_pgn_result"
+      state_topic: "qGames/chess/pgn_result"
+      icon: "mdi:format-list-numbered"
+
+    - name: "qGames Chess Clock Left"
+      unique_id: "qgames2_chess_clock_left"
+      state_topic: "qGames/chess/clock_left_s"
+      unit_of_measurement: "s"
+      device_class: duration
+      icon: "mdi:timer-outline"
+
+    # RETAINED, and published BEFORE the scalars — a dashboard that restarts an
+    # hour later still has the last game. The full PGN is chess.com's export
+    # shape, headers plus {[%clk H:MM:SS.t]} after every move, so it pastes
+    # straight into any board viewer. A Home Assistant sensor STATE is capped at
+    # 255 characters, so this one is deliberately truncated: use the topic
+    # itself for a Markdown card or a template that needs the whole game.
+    - name: "qGames Chess PGN"
+      unique_id: "qgames2_chess_pgn"
+      state_topic: "qGames/chess/pgn"
+      value_template: "{{ value[:250] }}"
+      icon: "mdi:chess-rook"
+
+    - name: "qGames Chess Final Position"
+      unique_id: "qgames2_chess_fen"
+      state_topic: "qGames/chess/fen"
+      icon: "mdi:checkerboard"
 
 
     # ── Diagnostics ──────────────────────────────────────────────────────────
