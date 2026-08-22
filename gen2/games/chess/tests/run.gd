@@ -34,6 +34,9 @@ func _initialize() -> void:
 	_test_opponent_levels()
 	_test_game_flow()
 	_test_telemetry_payload()
+	_test_piece_paths()
+	_test_audio_cues()
+	_test_easing()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -566,3 +569,156 @@ func _test_telemetry_payload() -> void:
 		if not (v is int or v is float or v is String or v is bool):
 			flat = false
 	_check("every telemetry value is a flat scalar", flat)
+
+
+# ------------------------------------------------------------- piece artwork
+
+func _test_piece_paths() -> void:
+	## The path parser is the only thing standing between the artwork and a
+	## silently wrong shape — a mistyped command used to draw nothing at all,
+	## with no error until somebody looked at the board.
+	var line: PackedVector2Array = ChessPieces.tessellate("M 10,20 L 30,40")
+	_eq("a line is two points", line.size(), 2)
+	_check("...at the coordinates given",
+			line[0] == Vector2(10, 20) and line[1] == Vector2(30, 40))
+
+	var curve: PackedVector2Array = ChessPieces.tessellate("M 0,0 C 0,50 100,50 100,0")
+	_eq("a cubic is tessellated into CURVE_STEPS segments",
+			curve.size(), ChessPieces.CURVE_STEPS + 1)
+	_check("...starting on the start point", curve[0] == Vector2(0, 0))
+	_check("...ending on the end point", curve[curve.size() - 1] == Vector2(100, 0))
+	# A symmetric cubic must bulge to the same height on both sides. This is
+	# what catches control points read in the wrong order.
+	var mid: Vector2 = curve[ChessPieces.CURVE_STEPS / 2]
+	_check("...and bulging symmetrically", absf(mid.x - 50.0) < 0.01 and mid.y > 20.0)
+
+	var quad: PackedVector2Array = ChessPieces.tessellate("M 0,0 Q 50,100 100,0")
+	_check("a quadratic passes through its endpoints",
+			quad[0] == Vector2(0, 0) and quad[quad.size() - 1] == Vector2(100, 0))
+
+	var closed: PackedVector2Array = ChessPieces.tessellate("M 5,5 L 15,5 L 15,15 Z L 25,25")
+	_check("Z returns the cursor to the subpath start",
+			closed[closed.size() - 1] == Vector2(25, 25))
+
+	# Every piece must sit inside the box draw_piece fits to, or it is drawn
+	# smaller than its square or clipped by it.
+	var all_inside: bool = true
+	var reaches_bottom: bool = true
+	for type in [ChessPieces.PAWN, ChessPieces.KNIGHT, ChessPieces.BISHOP,
+			ChessPieces.ROOK, ChessPieces.QUEEN, ChessPieces.KING]:
+		var spec: Dictionary = ChessPieces.PIECES[type]
+		var lo := Vector2(999, 999)
+		var hi := Vector2(-999, -999)
+		for d: String in (spec["fills"] as Array) + (spec["strokes"] as Array):
+			for pt in ChessPieces.tessellate(d):
+				lo = lo.min(pt)
+				hi = hi.max(pt)
+		for c: Array in spec["circles"]:
+			lo = lo.min(Vector2(c[0]) - Vector2(float(c[1]), float(c[1])))
+			hi = hi.max(Vector2(c[0]) + Vector2(float(c[1]), float(c[1])))
+		if lo.x < ChessPieces.ART_MIN.x or lo.y < ChessPieces.ART_MIN.y:
+			all_inside = false
+		if hi.x > ChessPieces.ART_MAX.x or hi.y > ChessPieces.ART_MAX.y:
+			all_inside = false
+		# Every piece stands on the same base, so every piece must reach it.
+		if absf(hi.y - 88.0) > 0.5:
+			reaches_bottom = false
+	_check("every piece fits the box draw_piece scales to", all_inside)
+	_check("every piece stands on the same baseline", reaches_bottom)
+
+
+# -------------------------------------------------------------------- audio
+
+func _test_audio_cues() -> void:
+	## Only the synthesis is tested, never a player: creating an
+	## AudioStreamPlayer under `--headless` with a real audio driver HANGS the
+	## process (verified — a probe that added one never returned). The cue
+	## buffers are pure arithmetic and are the part that can be wrong.
+	var audio := ChessAudio.new()
+	audio._build_all()
+	var cues: Array[String] = [
+		ChessAudio.MOVE, ChessAudio.CAPTURE, ChessAudio.CASTLE, ChessAudio.CHECK,
+		ChessAudio.PROMOTE, ChessAudio.SELECT, ChessAudio.ILLEGAL,
+		ChessAudio.WIN, ChessAudio.LOSS, ChessAudio.DRAW,
+	]
+	var all_present: bool = true
+	var edges_silent: bool = true
+	var within_headroom: bool = true
+	var tails_decayed: bool = true
+	var audible: bool = true
+	for cue: String in cues:
+		if not audio._streams.has(cue):
+			all_present = false
+			continue
+		var wav: AudioStreamWAV = audio._streams[cue]
+		var f: PackedFloat32Array = ChessAudio.to_floats(wav)
+		if f.size() < 100:
+			audible = false
+			continue
+		var peak: float = 0.0
+		for v in f:
+			peak = maxf(peak, absf(v))
+		if peak > ChessAudio.PEAK + 0.01:
+			within_headroom = false
+		if peak < 0.2:
+			audible = false
+		# A buffer that starts or ends on a non-zero sample ticks on its own.
+		if absf(f[0]) > 0.001 or absf(f[f.size() - 1]) > 0.001:
+			edges_silent = false
+		# ...and one whose tail is still ringing when the buffer ends is CUT
+		# off, which is the same tick at the other end. Found by plotting the
+		# envelopes: check, promote and the three result cues were all being
+		# chopped at about 29% of peak.
+		var tail: float = 0.0
+		for i in range(int(f.size() * 0.97), f.size()):
+			tail = maxf(tail, absf(f[i]))
+		if tail > peak * 0.02:
+			tails_decayed = false
+	_check("every cue is built", all_present)
+	_check("every cue is actually audible", audible)
+	_check("no cue exceeds the headroom", within_headroom)
+	_check("every cue starts and ends in silence", edges_silent)
+	_check("every cue has decayed before its buffer ends", tails_decayed)
+
+	_eq("cues are 16-bit mono",
+			[audio._streams[ChessAudio.MOVE].format, audio._streams[ChessAudio.MOVE].stereo],
+			[AudioStreamWAV.FORMAT_16_BITS, false])
+	_check("cues do not loop",
+			audio._streams[ChessAudio.MOVE].loop_mode == AudioStreamWAV.LOOP_DISABLED)
+
+	# The noise burst is seeded, not random: the same move has to sound the
+	# same on every launch or the set stops reading as one instrument.
+	var again := ChessAudio.new()
+	again._build_all()
+	_check("synthesis is deterministic",
+			again._streams[ChessAudio.MOVE].data == audio._streams[ChessAudio.MOVE].data)
+
+	# A capture should carry more weight than a move, and a pick-up less.
+	var move_len: int = audio._streams[ChessAudio.MOVE].data.size()
+	var capture_len: int = audio._streams[ChessAudio.CAPTURE].data.size()
+	var select_len: int = audio._streams[ChessAudio.SELECT].data.size()
+	_check("a capture rings longer than a move", capture_len > move_len)
+	_check("a pick-up is the shortest cue of all", select_len < move_len)
+
+
+# -------------------------------------------------------------------- easing
+
+func _test_easing() -> void:
+	_check("a slide starts where it started", is_equal_approx(ChessBoardView._ease_out(0.0), 0.0))
+	_check("...and arrives", is_equal_approx(ChessBoardView._ease_out(1.0), 1.0))
+	var monotonic: bool = true
+	var front_loaded: bool = false
+	var previous: float = -1.0
+	for i in 21:
+		var t: float = i / 20.0
+		var v: float = ChessBoardView._ease_out(t)
+		if v < previous:
+			monotonic = false
+		previous = v
+		if is_equal_approx(t, 0.5) and v > 0.7:
+			front_loaded = true
+	_check("a slide never goes backwards", monotonic)
+	_check("...and is front-loaded, which is what makes it look like a hand", front_loaded)
+	_check("easing is clamped outside 0..1",
+			is_equal_approx(ChessBoardView._ease_out(1.5), 1.0)
+			and is_equal_approx(ChessBoardView._ease_out(-0.5), 0.0))

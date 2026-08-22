@@ -36,6 +36,27 @@ const C_PIECE_BLACK: Color = Color(0.1373, 0.1373, 0.1569)
 ## the thing it is carrying.
 const DRAG_LIFT: float = 0.18
 
+## How long a piece takes to travel between squares. Short enough that it never
+## delays the player and long enough to be followed by eye — the point of the
+## slide is that the computer's reply is SEEN rather than discovered, which a
+## child playing their first games needs more than an adult does.
+const MOVE_SEC: float = 0.20
+## A taken piece fades rather than vanishing, so it is obvious what was lost.
+const CAPTURE_SEC: float = 0.22
+## A promoted piece swells into place. It is the one move where a piece becomes
+## a different piece, and without this it simply blinks.
+const PROMOTE_SEC: float = 0.26
+## Selection dots and the last-move wash come up rather than snapping on.
+const HIGHLIGHT_SEC: float = 0.13
+const SELECT_SEC: float = 0.10
+## The check glow breathes at this rate. Slow: it is a warning, not an alarm.
+const CHECK_PERIOD: float = 1.4
+## Idle animations repaint at this rate, not at the frame rate. The same
+## measurement that caught sequence idling at 52% CPU applies here — a board
+## that repaints 60 times a second to pulse one square is a Pi running hot for
+## nothing. Moves are exempt: they are brief and want every frame.
+const IDLE_HZ: float = 24.0
+
 var board: ChessBoard = null
 var flipped: bool = false
 var interactive: bool = true
@@ -64,6 +85,18 @@ const DRAG_SLOP: float = 8.0
 var _square: float = 64.0
 var _origin: Vector2 = Vector2.ZERO
 
+## Pieces currently sliding: {piece, from_sq, to_sq, t}. More than one at a
+## time only for castling, where the rook travels with the king.
+var _slides: Array = []
+## Captured pieces fading out: {piece, sq, t}.
+var _fades: Array = []
+## Squares whose piece is swelling into place: sq -> t.
+var _pops: Dictionary = {}
+var _highlight_t: float = 1.0
+var _select_t: float = 0.0
+var _check_phase: float = 0.0
+var _idle_accum: float = 0.0
+
 
 func _init() -> void:
 	focus_mode = Control.FOCUS_ALL
@@ -74,7 +107,11 @@ func show_position(b: ChessBoard, from_sq: int = -1, to_sq: int = -1) -> void:
 	board = b
 	last_from = from_sq
 	last_to = to_sq
+	_slides.clear()
+	_fades.clear()
+	_pops.clear()
 	clear_selection()
+	set_process(true)
 	queue_redraw()
 
 
@@ -83,6 +120,7 @@ func clear_selection() -> void:
 	targets = PackedInt32Array()
 	_dragging = false
 	_drag_from = -1
+	set_process(true)
 	queue_redraw()
 
 
@@ -94,11 +132,13 @@ func select(sq: int) -> void:
 		clear_selection()
 		return
 	selected = sq
+	_select_t = 0.0
 	targets = PackedInt32Array()
 	for m in moves:
 		var to: int = B.move_to(m)
 		if not targets.has(to):
 			targets.append(to)
+	set_process(true)
 	queue_redraw()
 
 
@@ -112,6 +152,116 @@ func clear_hint() -> void:
 	hint_from = -1
 	hint_to = -1
 	queue_redraw()
+
+
+# ------------------------------------------------------------------ animation
+
+func animate_move(m: int, moved_piece: int, captures: Array) -> void:
+	## Called AFTER the board has been updated. The piece is therefore already
+	## on its destination square as far as the model is concerned; the slide is
+	## a lie told over the top of it, and `_draw` suppresses the destination so
+	## the same piece is not drawn twice.
+	var from: int = B.move_from(m)
+	var to: int = B.move_to(m)
+	var promo: int = B.move_promo(m)
+	_slides.append({"piece": moved_piece, "from": from, "to": to, "t": 0.0})
+	if B.move_flag(m) == B.FLAG_CASTLE:
+		# The rook goes with the king, or castling looks like the rook
+		# teleported — which is exactly the move a child is least sure of.
+		var rook: Array = _castle_rook(to)
+		if not rook.is_empty():
+			_slides.append({"piece": ROOK_OF[to], "from": rook[0], "to": rook[1], "t": 0.0})
+	for c: Array in captures:
+		_fades.append({"piece": int(c[1]), "sq": int(c[0]), "t": 0.0})
+	if promo != 0:
+		_pops[to] = 0.0
+	_highlight_t = 0.0
+	set_process(true)
+	queue_redraw()
+
+
+## Rook origin and destination per king destination square, and the rook's
+## signed piece code. Keyed by the king's `to`, which is the only thing the
+## move carries.
+const CASTLE_ROOKS: Dictionary = {
+	6: [7, 5], 2: [0, 3], 118: [119, 117], 114: [112, 115],
+}
+const ROOK_OF: Dictionary = {6: B.ROOK, 2: B.ROOK, 118: -B.ROOK, 114: -B.ROOK}
+
+
+func _castle_rook(king_to: int) -> Array:
+	return CASTLE_ROOKS.get(king_to, [])
+
+
+func is_animating() -> bool:
+	return not _slides.is_empty() or not _fades.is_empty() or not _pops.is_empty()
+
+
+func skip_animations() -> void:
+	## Used when the position changes for a reason that is not a move — a
+	## takeback, a review jump, a new game. Sliding a piece to a square it was
+	## never on would be worse than not sliding it at all.
+	_slides.clear()
+	_fades.clear()
+	_pops.clear()
+	_highlight_t = 1.0
+	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	var busy: bool = false
+
+	for i in range(_slides.size() - 1, -1, -1):
+		_slides[i]["t"] = float(_slides[i]["t"]) + delta / MOVE_SEC
+		if float(_slides[i]["t"]) >= 1.0:
+			_slides.remove_at(i)
+		else:
+			busy = true
+	for i in range(_fades.size() - 1, -1, -1):
+		_fades[i]["t"] = float(_fades[i]["t"]) + delta / CAPTURE_SEC
+		if float(_fades[i]["t"]) >= 1.0:
+			_fades.remove_at(i)
+		else:
+			busy = true
+	for sq: int in _pops.keys():
+		_pops[sq] = float(_pops[sq]) + delta / PROMOTE_SEC
+		if float(_pops[sq]) >= 1.0:
+			_pops.erase(sq)
+		else:
+			busy = true
+
+	if _highlight_t < 1.0:
+		_highlight_t = minf(1.0, _highlight_t + delta / HIGHLIGHT_SEC)
+		busy = true
+	var want_select: float = 1.0 if selected >= 0 else 0.0
+	if not is_equal_approx(_select_t, want_select):
+		var step: float = delta / SELECT_SEC
+		_select_t = minf(_select_t + step, 1.0) if want_select > 0.0 else maxf(_select_t - step, 0.0)
+		busy = true
+
+	var checking: bool = board != null and board.in_check()
+	if checking:
+		_check_phase = fmod(_check_phase + delta / CHECK_PERIOD, 1.0)
+
+	if busy:
+		queue_redraw()
+		_idle_accum = 0.0
+	elif checking:
+		# Throttled: the glow is the only thing moving, and it does not need
+		# sixty repaints a second to breathe.
+		_idle_accum += delta
+		if _idle_accum >= 1.0 / IDLE_HZ:
+			_idle_accum = 0.0
+			queue_redraw()
+	else:
+		set_process(false)
+
+
+static func _ease_out(t: float) -> float:
+	## Cubic ease-out. A linear slide reads as mechanical; starting fast and
+	## settling is what makes it look like a hand putting a piece down.
+	var u: float = 1.0 - clampf(t, 0.0, 1.0)
+	return 1.0 - u * u * u
 
 
 # ---------------------------------------------------------------- geometry
@@ -294,46 +444,71 @@ func _draw() -> void:
 			var sq: int = B.square_of(file, rank)
 			var r: Rect2 = square_rect(sq)
 			var light: bool = (file + rank) % 2 == 1
-			var is_last: bool = sq == last_from or sq == last_to
-			var base: Color
-			if is_last:
-				base = C_LIGHT_LAST if light else C_DARK_LAST
-			else:
-				base = C_LIGHT if light else C_DARK
+			var base: Color = C_LIGHT if light else C_DARK
+			if sq == last_from or sq == last_to:
+				base = base.lerp(C_LIGHT_LAST if light else C_DARK_LAST, _highlight_t)
 			draw_rect(r, base)
 			if show_coords:
 				_draw_coords(font, coord_size, file, rank, r, light)
 
-	# The king in check, under the pieces so the piece is never obscured.
+	# The king in check, under the pieces so the piece is never obscured. The
+	# glow breathes rather than sitting still: a static red square is read once
+	# and then stops being noticed.
 	if board.in_check():
 		var k: int = board.king_sq[0 if board.side == B.WHITE else 1]
 		if k >= 0:
+			var pulse: float = 0.5 + 0.5 * sin(_check_phase * TAU)
 			var kr: Rect2 = square_rect(k)
-			draw_circle(kr.get_center(), _square * 0.52, Color(C_CHECK, 0.35))
-			draw_circle(kr.get_center(), _square * 0.40, Color(C_CHECK, 0.45))
+			draw_circle(kr.get_center(), _square * (0.50 + 0.04 * pulse),
+					Color(C_CHECK, 0.22 + 0.16 * pulse))
+			draw_circle(kr.get_center(), _square * 0.40, Color(C_CHECK, 0.38 + 0.14 * pulse))
 
-	if selected >= 0:
+	if selected >= 0 and _select_t > 0.0:
 		var light_sel: bool = (B.file_of(selected) + B.rank_of(selected)) % 2 == 1
-		draw_rect(square_rect(selected), C_LIGHT_SELECT if light_sel else C_DARK_SELECT)
+		var sel: Color = C_LIGHT_SELECT if light_sel else C_DARK_SELECT
+		draw_rect(square_rect(selected), Color(sel, _select_t))
 
 	for sq in targets:
 		var r2: Rect2 = square_rect(sq)
+		var dot: Color = Color(C_DOT, C_DOT.a * _select_t)
 		if board.board[sq] != 0 or (sq == board.ep and absi(board.board[selected]) == B.PAWN):
 			# A capture is a ring around the square, not a dot in the middle,
 			# so the piece being taken stays visible.
-			draw_arc(r2.get_center(), _square * 0.44, 0.0, TAU, 32, C_DOT, _square * 0.09, true)
+			draw_arc(r2.get_center(), _square * 0.44, 0.0, TAU, 32, dot,
+					_square * 0.09 * _select_t, true)
 		else:
-			draw_circle(r2.get_center(), _square * 0.16, C_DOT)
+			draw_circle(r2.get_center(), _square * 0.16 * _select_t, dot)
+
+	# Squares a sliding piece is heading for are left empty until it lands, or
+	# the same piece is drawn twice — once travelling and once already there.
+	var arriving: Dictionary = {}
+	for slide: Dictionary in _slides:
+		arriving[int(slide["to"])] = true
 
 	for sq in 128:
 		if sq & 0x88:
 			continue
 		var p: int = board.board[sq]
-		if p == 0:
+		if p == 0 or arriving.has(sq):
 			continue
 		if _dragging and sq == _drag_from:
 			continue
-		_draw_piece_at(p, square_rect(sq))
+		if _pops.has(sq):
+			_draw_piece_at(p, _pop_rect(square_rect(sq), float(_pops[sq])))
+		else:
+			_draw_piece_at(p, square_rect(sq))
+
+	for fade: Dictionary in _fades:
+		var ft: float = float(fade["t"])
+		_draw_piece_at(int(fade["piece"]), _pop_rect(square_rect(int(fade["sq"])), 1.0),
+				1.0 - ft)
+
+	for slide: Dictionary in _slides:
+		var a: Rect2 = square_rect(int(slide["from"]))
+		var b: Rect2 = square_rect(int(slide["to"]))
+		var k: float = _ease_out(float(slide["t"]))
+		_draw_piece_at(int(slide["piece"]),
+				Rect2(a.position.lerp(b.position, k), a.size))
 
 	if hint_from >= 0 and hint_to >= 0:
 		_draw_arrow(square_rect(hint_from).get_center(), square_rect(hint_to).get_center())
@@ -348,6 +523,15 @@ func _draw() -> void:
 			var s: float = _square * 1.06
 			var centre: Vector2 = _drag_pos - Vector2(0.0, _square * DRAG_LIFT)
 			_draw_piece_at(p2, Rect2(centre - Vector2(s, s) * 0.5, Vector2(s, s)))
+
+
+func _pop_rect(r: Rect2, t: float) -> Rect2:
+	## Swells from a little under full size, overshooting slightly before it
+	## settles. The overshoot is what makes it read as a piece being placed
+	## rather than a sprite being scaled.
+	var k: float = _ease_out(t)
+	var factor: float = lerpf(0.55, 1.0, k) + 0.10 * sin(PI * clampf(t, 0.0, 1.0))
+	return Rect2(r.get_center() - r.size * factor * 0.5, r.size * factor)
 
 
 func _draw_coords(font: Font, coord_size: int, file: int, rank: int,
@@ -366,11 +550,14 @@ func _draw_coords(font: Font, coord_size: int, file: int, rank: int,
 				str(rank + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, coord_size, colour)
 
 
-func _draw_piece_at(p: int, r: Rect2) -> void:
+func _draw_piece_at(p: int, r: Rect2, alpha: float = 1.0) -> void:
 	var white: bool = p > 0
-	ChessPieces.draw_piece(self, absi(p), r.grow(-r.size.x * 0.06),
-			C_PIECE_WHITE if white else C_PIECE_BLACK,
-			C_PIECE_BLACK if white else C_PIECE_WHITE)
+	var fill: Color = C_PIECE_WHITE if white else C_PIECE_BLACK
+	var edge: Color = C_PIECE_BLACK if white else C_PIECE_WHITE
+	if alpha < 1.0:
+		fill.a = alpha
+		edge.a = alpha
+	ChessPieces.draw_piece(self, absi(p), r.grow(-r.size.x * 0.06), fill, edge)
 
 
 func _draw_arrow(from: Vector2, to: Vector2) -> void:

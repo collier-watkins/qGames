@@ -46,9 +46,11 @@ func _initialize() -> void:
 		_stage_start,
 		_stage_board,
 		_stage_selected,
+		_stage_midslide,
 		_stage_played,
 		_stage_keyboard,
 		_stage_keyboard_played,
+		_stage_sound,
 		_stage_review,
 		_stage_live,
 		_stage_promotion_setup,
@@ -187,6 +189,16 @@ func _stage_selected() -> bool:
 			(_board.get("targets") as PackedInt32Array).size(), 2)
 	_shot("02_selected")
 	_click(_square_pos("e4"))
+	# Deliberately shorter than MOVE_SEC, so the next stage catches the piece
+	# in flight rather than after it has landed.
+	_wait(70)
+	return false
+
+
+func _stage_midslide() -> bool:
+	_ck_true("the piece is still travelling a moment after the move",
+			bool(_board.call("is_animating")))
+	_shot("02b_midslide")
 	# The opponent thinks on a worker thread behind a minimum thinking time;
 	# give it real time rather than assuming it has finished.
 	_wait(2500)
@@ -198,6 +210,8 @@ func _stage_played() -> bool:
 	_ck("tapping the destination plays the move", str(game.records[0]["san"]), "e4")
 	_ck_true("the move reached the move list", _view.get("_moves_list").item_count >= 1)
 	_ck_true("the computer answered", game.records.size() >= 2)
+	_ck_true("the animation finishes on its own",
+			not bool(_board.call("is_animating")))
 	_shot("03_after_reply")
 	return false
 
@@ -222,6 +236,23 @@ func _stage_keyboard_played() -> bool:
 	_key(KEY_ENTER)
 	_wait(2500)
 	_ck("...and Enter on the target plays it", str(game.records[2]["san"]), "d4")
+	return false
+
+
+func _stage_sound() -> bool:
+	## The audio node only exists in a real run — tests/run.gd deliberately
+	## never builds a player, because one under --headless hangs the process.
+	var audio: Node = _view.get("_audio")
+	_ck_true("the game has a sound engine", audio != null)
+	_ck_true("...with every cue built", audio.get("_streams").size() >= 10)
+	var button: Button = _find_button(_view, "Sound")
+	_ck_true("sound can be switched off from the panel", button != null)
+	_ck_true("...and starts on", button.button_pressed)
+	button.button_pressed = false
+	_ck_true("turning it off silences the engine", not bool(audio.get("enabled")))
+	button.button_pressed = true
+	_ck_true("...and turning it back on restores it", bool(audio.get("enabled")))
+	_wait(120)
 	return false
 
 

@@ -165,8 +165,8 @@ returns to scope).
 
 ## Current state
 
-**Five games built, all tests green** (2026-08-22): chess 144/144, memory 74/74,
-notes 332/332, paint 56/56, sequence 27/27 — 633 tests, 0 failures.
+**Five games built, all tests green** (2026-08-22): chess 169/169, memory 74/74,
+notes 332/332, paint 56/56, sequence 27/27 — 658 tests, 0 failures.
 
 The project began as a spike — port `memory` (the old suite's smallest game, 281
 lines) to prove the workflow before committing to a full rewrite. The spike's
@@ -174,6 +174,113 @@ questions are now answered except one: the code-first loop holds up across three
 games of different shapes, keypad-plus-touch works on all three, GDScript suits
 the work, and the Linux x86_64 and arm64 exports come out clean. **Android is
 still unanswered** — the SDK is not installed, so no APK has ever been built.
+
+**Chess got a polish pass** (2026-08-22): Bezier piece artwork, animation, and
+sound. All three were asked for together and all three turned out to be the
+same problem — the game was correct and read as a diagram.
+
+**The pieces are Bezier outlines now, not polygons.** `src/pieces.gd` holds
+SVG-style path data in a 100x100 box, tessellated ONCE per piece into polygons
+and cached; only the transform is per-draw. The straight-edged first version
+read as a set of road signs, because a chess set is nothing but curves. The
+shapes are Staunton: ball-headed pawn, crenellated rook, slit mitre, coronet,
+cross-topped king, and a knight with an ear and a mane.
+
+Three things that were established by rendering them and looking, not by
+reasoning:
+
+- **A stack of rings reads as a wedding cake.** The first base was a band plus
+  a foot, and with the collar above it every piece had three horizontal bars
+  that merged into a smudge at 32px — which is the size a phone draws. One
+  flared base fixed it.
+- **The knight is the whole set.** Two bumps read as a rabbit and a rounded
+  head read as a dog; it took an explicit notch for the ear, a muzzle that
+  actually points, and a mane stroke down the back before it read as a horse.
+- **The king's crown has to be NARROWER than the body under it.** Drawn the
+  same width it merged with the collar into one mass and the piece was a bell
+  with a cross stuck on top.
+
+**Pieces are fitted to the artwork's measured bounds, not to the nominal box.**
+The tallest piece reaches y=1 and every base ends at y=88, so fitting the
+100x100 box left a tenth of every square empty underneath and the set looked
+undersized. `ART_MIN`/`ART_MAX` are the UNION across all six — per-piece bounds
+would scale a pawn up to the size of a king — and a test asserts every piece
+stays inside them and stands on the same baseline, so editing the art cannot
+silently break the fit.
+
+A GDScript trap, from the polygon version and still worth knowing:
+**`const X := PackedVector2Array([...])` is not a constant expression** and
+fails to compile.
+
+`icon.svg` is now GENERATED from the knight's own path data rather than being a
+second drawing that happens to look similar. `tests/render_pieces.gd` renders
+the whole set at 96, 56 and 32px on both square colours; it needs a display and
+is not part of `make test-all`.
+
+**Everything that moves, moves.** Pieces slide between squares over 200 ms with
+a cubic ease-out, the rook travels with the king when castling, a captured
+piece fades rather than vanishing, a promoted piece swells into place with a
+slight overshoot, the last-move wash and the selection dots come up rather than
+snapping on, and the check glow breathes. Dialogs fade and lift; a flip fades,
+because every piece changes square at once and there is nothing to slide.
+
+The reason for the slide is not decoration: **the computer's reply is now SEEN
+rather than discovered.** A child playing their first games cannot spot what
+changed between two still frames of a chess position, and an adult barely can.
+
+Two decisions inside it worth keeping:
+
+- **The slide is a lie told over the top of the model.** By the time it runs
+  the piece is already on its destination square, so `_draw` suppresses that
+  square until the slide lands — otherwise the same piece is drawn twice, once
+  travelling and once already arrived.
+- **What is captured has to be read BEFORE the move is made.** Afterwards the
+  piece is simply gone and there is nothing left to fade. En passant takes a
+  piece that is not on the destination square, which is the case a naive
+  `board[to]` misses.
+- **Idle animation is throttled to 24 Hz, moves are not.** The check glow is
+  the only thing moving between moves and does not need sixty repaints a second
+  to breathe — the same measurement that caught sequence idling at 52% CPU. The
+  view stops processing entirely when nothing is animating.
+
+**Sound is synthesised at load, not shipped as files.** Ten short cues as .wav
+would be a licence to check, a folder to import and a few hundred kilobytes in
+each of four architecture builds. `src/audio.gd` is modal synthesis instead: a
+noise burst to excite the body plus a few damped sinusoids to ring, which is
+genuinely how a wooden piece on a wooden board sounds and is why the cues read
+as wood rather than as beeps. Moves, captures, castling (two knocks, because
+two pieces moved), check, promotion, pick-up, an illegal tap, and win/loss/draw.
+The noise burst is seeded, so the same move sounds the same on every launch.
+
+- **A cue that is still ringing when its buffer ends is CUT, and the cut is
+  audible.** Plotting the envelopes showed check, promotion and all three
+  result cues being chopped at about 29% of peak. Buffers now run about four
+  and a half decay constants past the last note, and a test asserts the last 3%
+  of every cue is below 2% of its peak.
+- **The fade at the two ends is not the same length.** A knock IS its attack,
+  and a 3 ms fade-in across the transient rounds it off into a thud. Half a
+  millisecond kills the discontinuity without being heard.
+- **Cues that follow another cue are delayed, not layered.** Check lands 180 ms
+  after the move that gave it and the result cue 300 ms after the last move.
+  Two sounds at one instant are heard as one confused sound.
+- Sound is on by default with a **Sound** toggle in the panel, saved to
+  `chess/sound`.
+
+⚠ **Creating an `AudioStreamPlayer` under `--headless` with a real audio driver
+HANGS the process.** VERIFIED — a probe that added one never returned, and
+`--audio-driver Dummy` fixes it. `tests/run.gd` therefore tests only the
+synthesis, which is pure arithmetic and is the part that can be wrong; the
+interactive test covers the player, and it runs with a display.
+
+⚠ **The sound engine belongs in qcore and is not there.** It is in the game
+because `QCORE_API.md` is frozen and a consumer does not get to redesign the
+shared library. Nothing about `src/audio.gd` is chess-specific except the list
+of cues. Moving it is the orchestrator's call.
+
+**Nobody has heard any of this.** The cues were designed, measured and plotted
+— peak, RMS, edge silence, tail decay and envelope shape are all checked — but
+they were never played through a speaker by anyone who could judge them. The
+shapes are right; whether they are pleasant is unverified.
 
 **Fifth game, new: `chess`** (2026-08-22). A full game of chess against the
 machine, with a clock, a move list, takeback and hints. Every rule is

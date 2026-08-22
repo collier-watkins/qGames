@@ -47,6 +47,7 @@ var _btn_hint: Button = null
 var _btn_takeback: Button = null
 var _btn_resign: Button = null
 var _btn_live: Button = null
+var _btn_sound: Button = null
 var _buttons: HFlowContainer = null
 
 var _setup: Control = null
@@ -67,6 +68,8 @@ var _pref_level: int = 4
 var _pref_base: int = 600
 var _pref_increment: int = 0
 var _thinking_dots: float = 0.0
+var _audio: ChessAudio = null
+var _pref_sound: bool = true
 
 
 func _game_ready() -> void:
@@ -79,6 +82,10 @@ func _game_ready() -> void:
 		# already has and is silent when there is none.
 		if _opponent.try_external(str(QConfig.get_value("chess/engine_path", ""))):
 			print("chess: external engine ", _opponent.external_name)
+
+	_audio = ChessAudio.new()
+	_audio.enabled = _pref_sound
+	add_child(_audio)
 
 	_build_ui()
 	resized.connect(_relayout)
@@ -110,6 +117,7 @@ func _load_prefs() -> void:
 	_pref_level = clampi(int(QConfig.get_value("chess/level", 4)), 1, O.LEVELS.size())
 	_pref_base = int(QConfig.get_value("chess/base_seconds", 600))
 	_pref_increment = int(QConfig.get_value("chess/increment_seconds", 0))
+	_pref_sound = bool(QConfig.get_value("chess/sound", true))
 
 
 func _save_prefs() -> void:
@@ -119,6 +127,7 @@ func _save_prefs() -> void:
 	QConfig.set_value("chess/level", _pref_level)
 	QConfig.set_value("chess/base_seconds", _pref_base)
 	QConfig.set_value("chess/increment_seconds", _pref_increment)
+	QConfig.set_value("chess/sound", _pref_sound)
 	QConfig.save()
 
 
@@ -127,6 +136,7 @@ func _save_prefs() -> void:
 func _build_ui() -> void:
 	_board_view = ChessBoardView.new()
 	_board_view.move_attempted.connect(_on_move_attempted)
+	_board_view.square_touched.connect(_on_square_touched)
 	add_child(_board_view)
 
 	_panel = PanelContainer.new()
@@ -182,6 +192,14 @@ func _build_ui() -> void:
 	buttons.add_child(_make_button("Flip", _on_flip))
 	buttons.add_child(_btn_resign)
 	buttons.add_child(_make_button("New game", _show_setup))
+	_btn_sound = Button.new()
+	_btn_sound.text = "Sound"
+	_btn_sound.toggle_mode = true
+	_btn_sound.button_pressed = _pref_sound
+	_btn_sound.add_theme_font_size_override("font_size", 16)
+	_btn_sound.custom_minimum_size = Vector2(0, 38)
+	_btn_sound.toggled.connect(_on_sound_toggled)
+	buttons.add_child(_btn_sound)
 
 
 func _player_row(name_label: Label, clock_label: Label) -> Control:
@@ -243,6 +261,7 @@ func _show_setup() -> void:
 		_setup.queue_free()
 	_setup = _build_setup()
 	add_child(_setup)
+	_fade_in(_setup)
 
 
 func _build_setup() -> Control:
@@ -404,6 +423,26 @@ func _fit_setup() -> void:
 			minf(wanted.y, maxf(size.y - 96.0, 160.0)))
 
 
+## How long an overlay takes to appear. Long enough to read as a panel arriving
+## rather than a screen changing, short enough that nobody waits for it.
+const OVERLAY_FADE_SEC: float = 0.14
+
+
+func _fade_in(overlay: Control) -> void:
+	## A dialog that snaps in is read as a fault — something went wrong and the
+	## screen changed. Fading it, and lifting the card the last few pixels,
+	## says the same thing calmly.
+	overlay.modulate.a = 0.0
+	var card: Control = overlay.get_child(0) as Control
+	var tween: Tween = overlay.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(overlay, "modulate:a", 1.0, OVERLAY_FADE_SEC)
+	if card != null:
+		card.position.y += 12.0
+		tween.tween_property(card, "position:y", card.position.y - 12.0,
+				OVERLAY_FADE_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+
 func _make_veil(alpha: float) -> ColorRect:
 	## A full-rect dimmer with a CenterContainer inside it. The container is
 	## what centres the card: it asks the card for its minimum size and places
@@ -440,6 +479,7 @@ func _start_game() -> void:
 	_game.start(side, _pref_base, _pref_increment, _pref_level, _opponent.level_name())
 	_board_view.flipped = side == B.BLACK
 	_board_view.show_position(_game.board)
+	_board_view.skip_animations()
 	_board_view.interactive = true
 	_review_ply = -1
 	_setup_scroll = null
@@ -510,6 +550,7 @@ func _on_move_attempted(from_sq: int, to_sq: int) -> void:
 		if B.move_from(m) == from_sq and B.move_to(m) == to_sq:
 			candidates.append(m)
 	if candidates.is_empty():
+		_audio.play(ChessAudio.ILLEGAL)
 		return
 	if candidates.size() > 1:
 		# The only move that generates four candidates is a promotion, and the
@@ -524,9 +565,23 @@ func _on_move_attempted(from_sq: int, to_sq: int) -> void:
 
 func _apply_move(m: int) -> void:
 	_board_view.clear_hint()
+	var from: int = B.move_from(m)
+	var to: int = B.move_to(m)
+	# What is about to be taken has to be read BEFORE the move is made — after
+	# it, the piece is simply gone and there is nothing left to fade out. En
+	# passant takes a piece that is not on the destination square, which is the
+	# case a naive "board[to]" misses.
+	var capture_sq: int = to
+	if B.move_flag(m) == B.FLAG_EP:
+		capture_sq = to - 16 * _game.board.side
+	var captured: int = _game.board.board[capture_sq]
+	var moved: int = _game.board.board[from]
 	if not _game.apply(m):
 		return
-	_board_view.show_position(_game.board, B.move_from(m), B.move_to(m))
+	_board_view.show_position(_game.board, from, to)
+	_board_view.animate_move(m, moved,
+			[[capture_sq, captured]] if captured != 0 else [])
+	_play_move_cues(m, captured != 0)
 	_refresh_moves()
 	if _game.over:
 		_on_game_over()
@@ -535,8 +590,38 @@ func _apply_move(m: int) -> void:
 	_update_status()
 
 
+## Cues that follow another cue are delayed rather than layered. Two sounds at
+## the same instant are heard as one confused sound; a beat apart, they are
+## heard as a move and then its consequence, which is the order the events
+## actually happened in.
+const CHECK_CUE_DELAY: float = 0.18
+const RESULT_CUE_DELAY: float = 0.30
+
+
+func _play_move_cues(m: int, was_capture: bool) -> void:
+	if B.move_promo(m) != 0:
+		_audio.play(ChessAudio.PROMOTE)
+	elif B.move_flag(m) == B.FLAG_CASTLE:
+		_audio.play(ChessAudio.CASTLE)
+	elif was_capture:
+		_audio.play(ChessAudio.CAPTURE)
+	else:
+		_audio.play(ChessAudio.MOVE)
+	if not _game.over and _game.board.in_check():
+		_cue_after(CHECK_CUE_DELAY, ChessAudio.CHECK)
+
+
+func _cue_after(seconds: float, cue: String) -> void:
+	var timer: SceneTreeTimer = get_tree().create_timer(seconds)
+	timer.timeout.connect(func() -> void: _audio.play(cue))
+
+
 func _on_game_over() -> void:
 	_board_view.interactive = false
+	match _game.telemetry_result():
+		"win": _cue_after(RESULT_CUE_DELAY, ChessAudio.WIN)
+		"loss": _cue_after(RESULT_CUE_DELAY, ChessAudio.LOSS)
+		"draw": _cue_after(RESULT_CUE_DELAY, ChessAudio.DRAW)
 	_publish(_game)
 	_show_endcard()
 	_update_status()
@@ -583,6 +668,7 @@ func _show_promotion() -> void:
 
 	_promo = veil
 	add_child(_promo)
+	_fade_in(_promo)
 
 
 func _finish_promotion(type: int) -> void:
@@ -622,6 +708,7 @@ func _on_takeback() -> void:
 			from_sq = B.square_from_name(uci.substr(0, 2))
 			to_sq = B.square_from_name(uci.substr(2, 2))
 		_board_view.show_position(_game.board, from_sq, to_sq)
+		_board_view.skip_animations()
 		_board_view.interactive = true
 		_refresh_moves()
 		_update_status()
@@ -634,8 +721,34 @@ func _on_resign() -> void:
 	_on_game_over()
 
 
+func _on_sound_toggled(on: bool) -> void:
+	_pref_sound = on
+	_audio.set_enabled(on)
+	_save_prefs()
+	if on:
+		# Play the cue you just turned back on, so the button proves itself.
+		_audio.play(ChessAudio.MOVE)
+
+
+func _on_square_touched(sq: int) -> void:
+	## The pick-up tick, and only for a piece that can actually be picked up —
+	## a tick on every tap anywhere would be noise rather than feedback.
+	if _game == null or _game.over or not _game.is_human_turn():
+		return
+	var p: int = _game.board.board[sq]
+	if p != 0 and (p > 0) == (_game.board.side > 0):
+		_audio.play(ChessAudio.SELECT)
+
+
 func _on_flip() -> void:
+	## Every piece changes square at once, so there is nothing to slide — a
+	## flip is a different view of the same position, not a move. It fades
+	## instead, which reads as the board turning over rather than as thirty-two
+	## pieces teleporting.
 	_board_view.flipped = not _board_view.flipped
+	_board_view.skip_animations()
+	_board_view.modulate.a = 0.35
+	_board_view.create_tween().tween_property(_board_view, "modulate:a", 1.0, 0.18)
 	_board_view.queue_redraw()
 
 
@@ -650,6 +763,7 @@ func _on_move_selected(index: int) -> void:
 	var uci: String = str(_game.records[index]["uci"])
 	_board_view.show_position(b, B.square_from_name(uci.substr(0, 2)),
 			B.square_from_name(uci.substr(2, 2)))
+	_board_view.skip_animations()
 	_board_view.interactive = false
 	_btn_live.visible = true
 	_update_status()
@@ -674,6 +788,7 @@ func _go_live() -> void:
 		from_sq = B.square_from_name(uci.substr(0, 2))
 		to_sq = B.square_from_name(uci.substr(2, 2))
 	_board_view.show_position(_game.board, from_sq, to_sq)
+	_board_view.skip_animations()
 	_board_view.interactive = not _game.over
 	_moves_list.deselect_all()
 	_update_status()
@@ -777,6 +892,7 @@ func _show_endcard() -> void:
 
 	_endcard = veil
 	add_child(_endcard)
+	_fade_in(_endcard)
 
 
 # ---------------------------------------------------------------- telemetry
