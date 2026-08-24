@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="312" height="356" viewBox="0 0 78 89">
+  <!-- generated from src/pieces.gd by 'make chess-pieces-repo' — delete this line once you have edited this file -->
+  <path d="M 17.00 42.00 L 7.00 24.00 C 11.00 31.00 16.00 33.00 20.00 30.00 L 23.00 17.00 C 26.00 30.00 32.00 37.00 39.00 39.00 C 46.00 37.00 52.00 30.00 55.00 17.00 L 58.00 30.00 C 62.00 33.00 67.00 31.00 71.00 24.00 L 61.00 42.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M 23.00 42.00 L 55.00 42.00 L 56.00 48.00 L 22.00 48.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M 22.00 48.00 L 56.00 48.00 C 59.00 55.00 62.00 63.00 64.00 70.00 L 14.00 70.00 C 16.00 63.00 19.00 55.00 22.00 48.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M 15.00 70.00 L 63.00 70.00 C 63.00 74.00 65.00 77.00 70.00 79.00 C 73.00 81.00 74.00 84.00 74.00 88.00 L 4.00 88.00 C 4.00 84.00 5.00 81.00 8.00 79.00 C 13.00 77.00 15.00 74.00 15.00 70.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
+</svg>

@@ -201,6 +201,10 @@ the repository at games/chess/assets/pieces/ instead — `make chess-pieces-repo
 writes it there with the .import stubs it needs. Without those stubs the set
 works in the editor and is silently missing from every exported build.
 
+Each generated file carries one marker comment near the top. Delete that line
+when you edit a piece: it is what tells the test suite the file is yours and
+should no longer be checked against the artwork drawn in code.
+
 Delete a file and that piece falls back to the one drawn in code, so you can
 replace them one at a time. Delete all of them and you get the built-in set
 back. Re-run with --dump-pieces to start over from the built-in artwork.

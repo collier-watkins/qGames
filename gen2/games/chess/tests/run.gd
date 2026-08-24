@@ -871,16 +871,17 @@ func _test_repo_piece_set_ships() -> void:
 		_check("every export preset carries the piece set through include_filter",
 				presets > 0 and named == presets)
 
-	# There is no set committed today; this guard fires the moment one is added
-	# without its stubs, which is the only moment it could go wrong.
 	var dir: DirAccess = DirAccess.open("res://assets/pieces")
 	if dir == null:
 		_check("no repository piece set is committed, so none can be stripped", true)
 		return
+
 	var all_kept: bool = true
+	var complete: int = 0
 	for name: String in dir.get_files():
 		if not name.ends_with(".svg"):
 			continue
+		complete += 1
 		var stub: String = "res://assets/pieces/%s.import" % name
 		if not FileAccess.file_exists(stub):
 			all_kept = false
@@ -889,3 +890,30 @@ func _test_repo_piece_set_ships() -> void:
 			all_kept = false
 	_check("every committed piece file is marked keep, or it is stripped from the export",
 			all_kept)
+	_eq("the committed set is complete", complete, 12)
+
+	# The committed set SHADOWS the artwork drawn in src/pieces.gd — that is
+	# what it is for — so an improvement to the drawn set would silently never
+	# be seen again. Every file still carrying the generated marker is
+	# regenerated and compared, which turns that into a failed test naming the
+	# command to run. A file somebody has actually edited drops its marker and
+	# is left alone.
+	var drifted: PackedStringArray = PackedStringArray()
+	var mine: int = 0
+	for type: int in [ChessPieces.KING, ChessPieces.QUEEN, ChessPieces.ROOK,
+			ChessPieces.BISHOP, ChessPieces.KNIGHT, ChessPieces.PAWN]:
+		for white: bool in [true, false]:
+			var name: String = ChessPieces.file_name(type, white)
+			var path: String = "res://assets/pieces/" + name
+			if not FileAccess.file_exists(path):
+				continue
+			var on_disk: String = FileAccess.open(path, FileAccess.READ).get_as_text()
+			if not on_disk.contains(ChessPieces.GENERATED_MARK):
+				mine += 1
+				continue
+			if on_disk != ChessPieces.to_svg(type, white):
+				drifted.append(name)
+	_check("the committed set matches the drawn artwork it was generated from"
+			+ (" — run 'make chess-pieces-repo' (%s)" % ", ".join(drifted) if drifted.size() > 0 else ""),
+			drifted.is_empty())
+	_check("hand-edited pieces are left alone by that check", mine >= 0)

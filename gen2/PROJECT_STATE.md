@@ -165,8 +165,8 @@ returns to scope).
 
 ## Current state
 
-**Five games built, all tests green** (2026-08-22): chess 190/190, memory 74/74,
-notes 332/332, paint 56/56, sequence 27/27 — 679 tests, 0 failures.
+**Five games built, all tests green** (2026-08-23): chess 193/193, memory 74/74,
+notes 332/332, paint 56/56, sequence 27/27 — 682 tests, 0 failures.
 
 The project began as a spike — port `memory` (the old suite's smallest game, 281
 lines) to prove the workflow before committing to a full rewrite. The spike's
@@ -254,11 +254,20 @@ packed and stubs there would be litter. A test asserts every export preset
 names the files and that any committed `.svg` has its keep stub, since that is
 the only moment it can go wrong.
 
-**No piece set is committed today, on purpose.** The built-in artwork's single
-source of truth is the path data in `src/pieces.gd`; committing an identical
-set of SVGs would duplicate it and then silently WIN over it, so a later
-improvement to the drawn set would never be seen. The mechanism is there and
-verified for a set somebody actually draws.
+**The set IS committed** (owner's call, 2026-08-23: nothing untracked). It
+lives at `games/chess/assets/pieces/` — twelve SVGs, twelve `.import` stubs and
+a README — and is what a shipped build now draws with; VERIFIED by reading
+`chess: pieces currently from res://assets/pieces (12 of 12)` out of a running
+export.
+
+The objection to committing it was real and is handled rather than dropped: a
+committed set SHADOWS the artwork in `src/pieces.gd`, so an improvement to the
+drawn set would silently never be seen again. Every generated file carries one
+marker comment, and a test regenerates each file that still has it and fails
+naming the command to run. VERIFIED by nudging the drawn artwork and watching
+the guard name all twelve files. Editing a piece means deleting its marker
+line, and the check then leaves that file alone — which is what makes the guard
+compatible with the feature it guards.
 
 **Getting output out of an exported build needs a clean exit.** Godot flushes
 stdout on exit, so a release binary killed mid-run prints nothing at all — a

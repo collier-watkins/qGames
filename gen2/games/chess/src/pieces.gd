@@ -273,6 +273,14 @@ const LETTER: Dictionary = {
 	KING: "K", QUEEN: "Q", ROOK: "R", BISHOP: "B", KNIGHT: "N", PAWN: "P",
 }
 
+## Marks a file as still being the generated artwork rather than somebody's
+## own. A committed set SHADOWS the drawn artwork in src/pieces.gd — that is
+## the point of it — which means an improvement to the drawn set would
+## otherwise never be seen again. A test regenerates every file that still
+## carries this line and fails if it has drifted, so the trap is loud instead
+## of silent. Editing a piece means deleting the line.
+const GENERATED_MARK: String = "<!-- generated from src/pieces.gd by 'make chess-pieces-repo' — delete this line once you have edited this file -->"
+
 const SVG_LIGHT: String = "#f4f4f2"
 const SVG_DARK: String = "#1f2126"
 const SVG_STROKE_WIDTH: float = 2.2
@@ -304,7 +312,8 @@ static func to_svg(type: int, white: bool) -> String:
 		body.append('  <circle cx="%.2f" cy="%.2f" r="%.2f" fill="%s"/>'
 				% [c.x, c.y, float(dot[1]), edge])
 	return ('<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %.0f %.0f">\n'
-			% [int(art.x) * 4, int(art.y) * 4, art.x, art.y]) + "\n".join(body) + "\n</svg>\n"
+			% [int(art.x) * 4, int(art.y) * 4, art.x, art.y]) \
+			+ "  " + GENERATED_MARK + "\n" + "\n".join(body) + "\n</svg>\n"
 
 
 static func _shift(d: String, by: Vector2) -> String:
