@@ -96,6 +96,52 @@ func _game_ready() -> void:
 	_view.attach()
 	_refresh()
 	_view.grab_focus()
+	# --paintdrag: drive a drag through the real drawing path, so the framerate
+	# the HUD reports is the framerate WHILE DRAWING. The Pi has no way to
+	# inject a pointer event, and drawing is the only thing this game does that
+	# is expensive — measuring it at rest says nothing. It is what caught the
+	# renderer's texture-upload cost; see the note in project.godot.
+	if "--paintdrag" in OS.get_cmdline_args() + OS.get_cmdline_user_args():
+		_drag_bench.call_deferred()
+
+
+## Drives a realistic drag through the REAL drawing path — _begin/_apply/_end on
+## the view — so the framerate the HUD reports is the framerate while drawing.
+## Two motion steps per frame is about what a 125 Hz mouse delivers at 60 fps.
+var _drag_n: int = 0
+var _drag_at: Vector2i = Vector2i(40, 40)
+var _drag_dir: Vector2i = Vector2i(9, 5)
+
+
+func _drag_bench() -> void:
+	_view._begin(_drag_at)
+	_drag_n = 1200
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	if _drag_n <= 0:
+		return
+	for i in 2:
+		var nxt: Vector2i = _drag_at + _drag_dir
+		if nxt.x < 4 or nxt.x > CANVAS_W - 5:
+			_drag_dir.x = -_drag_dir.x
+			nxt = _drag_at + _drag_dir
+		if nxt.y < 4 or nxt.y > CANVAS_H - 5:
+			_drag_dir.y = -_drag_dir.y
+			nxt = _drag_at + _drag_dir
+		_view._apply(nxt, _drag_at, true)
+		_drag_at = nxt
+	_drag_n -= 1
+	# Lift the pen every 90 frames and start again. A real session is many
+	# short strokes, and the stroke END is where the one full upload happens —
+	# a bench that never lifts the pen never measures it.
+	if _drag_n % 90 == 0:
+		_view._end()
+		_view._begin(_drag_at)
+	if _drag_n == 0:
+		_view._end()
+		print("[bench] drag finished")
 
 
 func colour() -> Color:
@@ -110,11 +156,17 @@ func brush_radius() -> int:
 
 
 func _build_ui() -> void:
-	var bg := ColorRect.new()
-	bg.color = C_CHROME
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	# The background is the viewport's CLEAR COLOUR, not a full-screen ColorRect.
+	#
+	# They look identical and cost wildly different amounts. A ColorRect is a
+	# canvas item: every frame the GPU rasterises and alpha-blends one quad over
+	# the whole window. A clear is free on a tile-based GPU — it just marks the
+	# tile buffer, with no memory read at all. MEASURED on the Pi 4 (V3D 4.2,
+	# 1920x1053 maximized, gl_compatibility): one full-screen quad was costing
+	# 9 ms of a 38 ms frame, a third of the budget, to draw a flat colour.
+	#
+	# project.godot sets the same colour so the frames before _ready() match.
+	RenderingServer.set_default_clear_color(C_CHROME)
 
 	# Children may anchor full-rect even though the root must not: QGameRoot
 	# guarantees the root's `size` is already the viewport in _game_ready().
@@ -427,7 +479,6 @@ class CanvasView extends Control:
 	var canvas: PaintCanvas
 	var owner_game: Node
 
-	var _texture: ImageTexture
 	var _drawing: bool = false
 	var _last: Vector2i = Vector2i.ZERO
 	## Where a KEYBOARD user is pointing, in canvas pixels. Only drawn when
@@ -474,28 +525,88 @@ class CanvasView extends Control:
 			_on_mouse_exited()
 
 	func attach() -> void:
-		_texture = ImageTexture.create_from_image(canvas.image)
-		canvas.changed.connect(func(_region: Rect2i) -> void: refresh_texture())
+		_build_tiles()
+		canvas.changed.connect(_on_canvas_changed)
 		set_process(true)
 		queue_redraw()
 
+	## The picture reaches the GPU as a GRID OF TILES, not as one texture.
+	##
+	## Godot cannot update part of a texture — ImageTexture.update() always
+	## sends the whole thing — so one texture for the whole canvas means
+	## re-sending 3.6 MB on every frame a stroke moves. MEASURED on a Pi 4 that
+	## is 190 ms per frame on Vulkan: five frames a second, unusable. The same
+	## drag sending a 256 KB region instead holds a locked 60, so the cost
+	## scales with BYTES and this is worth doing.
+	##
+	## A tile grid makes that saving STRUCTURAL: a dab dirties one or two tiles
+	## and only those are re-sent, no matter what the stroke does afterwards.
+	##
+	## The obvious cheaper-looking alternative — keep one big texture and upload
+	## the region changed since the last full refresh as a patch drawn over the
+	## top — was built first and MEASURED at 29 fps with a floor of 14. It
+	## degenerates: that region is a bounding box, it grows as the stroke
+	## travels, and once it passes about a third of the canvas a full upload is
+	## cheaper again — so every later frame of a long stroke pays for one. A
+	## tile's cost does not depend on how far the stroke has gone, which is the
+	## whole point.
+	##
+	## 256px tiles are 256 KB each. Smaller means more draw calls for no gain;
+	## much larger and one dab starts costing what it used to.
+	const TILE: int = 256
+
+	var _tiles: Array[ImageTexture] = []
+	var _tile_rects: Array[Rect2i] = []
+	var _tile_dirty: Array[bool] = []
+
+	func _build_tiles() -> void:
+		_tiles.clear()
+		_tile_rects.clear()
+		_tile_dirty.clear()
+		for y in range(0, canvas.height, TILE):
+			for x in range(0, canvas.width, TILE):
+				var r := Rect2i(x, y, mini(TILE, canvas.width - x),
+						mini(TILE, canvas.height - y))
+				_tile_rects.append(r)
+				_tiles.append(ImageTexture.create_from_image(canvas.image.get_region(r)))
+				_tile_dirty.append(false)
+		_stale = false
+
 	## Mark the picture stale. The actual upload waits for _process.
 	##
-	## A stroke is dozens of dabs and each one reports a change, so uploading
-	## on every report meant pushing the whole 3.5 MB texture to the GPU dozens
-	## of times for one drag of the mouse — measured at 47 ms frames. The
-	## screen can only show one of those anyway.
+	## A stroke is dozens of dabs and each one reports a change, so uploading on
+	## every report meant pushing a texture to the GPU dozens of times for one
+	## drag of the mouse. The screen can only show one of those anyway.
 	func refresh_texture() -> void:
+		for i in _tile_dirty.size():
+			_tile_dirty[i] = true
 		_stale = true
 
+	func _on_canvas_changed(region: Rect2i) -> void:
+		if _tiles.is_empty() or _tile_rects.size() != _expected_tiles():
+			_build_tiles()
+			queue_redraw()
+			return
+		_stale = true
+		if region.size.x <= 0 or region.size.y <= 0:
+			refresh_texture()
+			return
+		for i in _tile_rects.size():
+			if _tile_rects[i].intersects(region):
+				_tile_dirty[i] = true
+
+	func _expected_tiles() -> int:
+		return int(ceil(float(canvas.width) / TILE)) * int(ceil(float(canvas.height) / TILE))
+
 	func _process(_delta: float) -> void:
-		if not _stale or _texture == null:
+		if not _stale:
 			return
 		_stale = false
-		if _texture.get_size() != Vector2(canvas.width, canvas.height):
-			_texture.set_image(canvas.image)
-		else:
-			_texture.update(canvas.image)
+		for i in _tiles.size():
+			if not _tile_dirty[i]:
+				continue
+			_tile_dirty[i] = false
+			_tiles[i].update(canvas.image.get_region(_tile_rects[i]))
 		queue_redraw()
 
 	## Fit the fixed-size canvas into whatever pane it has, letterboxed. The
@@ -514,12 +625,19 @@ class CanvasView extends Control:
 		return Vector2i(((point - _offset) / _scale).floor())
 
 	func _draw() -> void:
-		if canvas == null or _texture == null:
+		if canvas == null or _tiles.is_empty():
 			return
 		_measure()
 		var paper: Rect2 = paper_rect()
 		draw_rect(paper.grow(3.0), C_SHADOW, true)
-		draw_texture_rect(_texture, paper, false)
+		# Adjacent tiles are placed from the same integer canvas coordinates, so
+		# one tile's right edge lands on exactly the float its neighbour starts
+		# at and the grid cannot show a seam.
+		for i in _tiles.size():
+			var r: Rect2i = _tile_rects[i]
+			draw_texture_rect(_tiles[i], Rect2(
+					_offset + Vector2(r.position) * _scale,
+					Vector2(r.size) * _scale), false)
 		draw_rect(paper, C_LINE, false, 1.0)
 
 		# The keyboard pointer, only for somebody actually driving with keys or
@@ -594,6 +712,10 @@ class CanvasView extends Control:
 			return
 		_drawing = false
 		canvas.end_stroke()
+		# NOTHING to refresh: every dab marked the tiles it touched and they
+		# were uploaded on the frame it happened, so the GPU is already current.
+		# An earlier design refreshed everything here and it cost 16 fps off the
+		# floor for no reason at all.
 		stroke_finished.emit()
 
 	func _gui_input(event: InputEvent) -> void:
