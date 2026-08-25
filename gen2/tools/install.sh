@@ -14,6 +14,15 @@
 #   ~/.local/share/applications/...      the menu entry
 #   ~/.local/share/icons/hicolor/...     the icon
 #
+# WHY StartupWMClass: it is how a running window gets matched back to the
+# launcher that owns it, and without it the taskbar shows a generic placeholder
+# instead of the game's icon while the game is open. The value must be the
+# Wayland app_id, and Godot sets that to `application/config/name` VERBATIM —
+# measured, not assumed: `WAYLAND_DEBUG=1` on the Pi shows
+# `xdg_toplevel.set_app_id("Chess")`. That is exactly the `name` in meta, capital
+# letter, space in "Memory Match" and all, which is why this uses $name and not
+# $id.
+#
 # WHY NO WRAPPER SCRIPT: the broker settings are baked into the executable at
 # build time (tools/bake_config.sh), so the game needs no environment. That
 # matters because a .desktop launcher does NOT inherit your shell environment —
@@ -138,6 +147,7 @@ Icon=qgames-$id
 Terminal=false
 Categories=Game;
 StartupNotify=true
+StartupWMClass=$name
 DESKTOP
     chmod 644 "$APP_DIR/qgames-$id.desktop"
     echo "installed $name  ($id, $ARCH, $version)"

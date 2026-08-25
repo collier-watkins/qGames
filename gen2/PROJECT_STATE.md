@@ -22,7 +22,8 @@ repo; each ships as its own installable app with its own identity.
 
 ## Stack
 
-**Godot 4.7.2, GDScript, Compatibility (OpenGL) renderer, code-first.**
+**Godot 4.7.2, GDScript, code-first.** Renderer: Forward Mobile (Vulkan) on
+desktop and the Pi, Compatibility (OpenGL) on Android.
 
 Why, against each requirement:
 
@@ -31,7 +32,7 @@ Why, against each requirement:
 | ARM Linux native | Official precompiled arm64 *and* arm32 export templates; an official arm64 editor also exists | yes — godotengine.org/download/linux, 4.7.2 dated 18 Aug 2026 |
 | Android native | First-class APK/AAB export, per-preset architecture toggles | yes — EditorExportPlatformAndroid docs |
 | Touch + keypad | `InputMap` binds one named action to keyboard, gamepad and touch at once; `TouchScreenButton` drives actions via `Input.action_press()`; *Emulate Touch From Mouse* exercises the touch path on a desktop | yes — Godot input docs |
-| Lightweight/calm | 2D only, Compatibility renderer, no physics, low node counts | design discipline, not a guarantee |
+| Lightweight/calm | 2D only, no physics, low node counts. Renderer is **Forward Mobile (Vulkan)** on desktop/Pi as of 2026-08-25 and Compatibility on Android — see "Framerate on the Pi" | measured on a Pi 4 |
 | LLM-workable | Every artifact Godot writes is text: `project.godot` (INI), `.tscn`, `.tres`, `.gd` | yes |
 | CI/CD | Headless CLI: `--headless --import`, `--script`, `--export-release` | yes |
 
@@ -1137,6 +1138,356 @@ export, and the native Wayland display driver — every capture used
   no `javac`), Android SDK, `adb`.
 - MQTT config lives at `user://config.cfg` — app-private storage on Android,
   `~/.local/share/godot/app_userdata/<project>/` on Linux. Never in the repo.
+
+## Window mode: maximized (2026-08-25)
+
+Every game's `project.godot` carries `[display] window/size/mode=2` (Maximized —
+the value is the engine's own enum, hint string "Windowed,Minimized,Maximized,
+Fullscreen,Exclusive Fullscreen"). Maximized rather than fullscreen on purpose:
+the target Pi has its panel at the top, and fullscreen would swallow it.
+
+**The project setting alone is not enough.** VERIFIED 2026-08-25 by screenshot on
+the Pi: under labwc/Wayland (Raspberry Pi OS trixie) the window still came up
+windowed at 1280x720 in the top-left corner. `QGameRoot._apply_window_mode()`
+re-asserts it from `_ready()` once the window exists, reading the value back out
+of ProjectSettings so `project.godot` stays the single place the intent is
+expressed. That is a no-op on backends that already honoured the setting.
+
+## The Pi (2026-08-25)
+
+- Host `10.118.25.17` (eth0, TRUSTED VLAN 25) — user **`q`**, Debian 13 trixie,
+  aarch64 → `arm64` builds. labwc + `wf-panel-pi`. VERIFIED.
+- Deployed with `tools/deploy.sh q@192.168.1.197` (see the routing note below);
+  all five gen2 games installed under `~/.local/share/qgames/`, launchers at
+  `~/.local/share/applications/qgames-<id>.desktop`.
+- **Taskbar launchers live in `~/.config/wf-panel-pi/wf-panel-pi.ini`**, key
+  `launchers=` under `[panel]`, space-separated .desktop basenames without the
+  extension. Set to `qgames-chess qgames-memory qgames-notes qgames-paint
+  qgames-sequence`. Backup alongside it as `wf-panel-pi.ini.bak-<date>`.
+  There is a second, stale `~/.config/wf-panel-pi.ini` (note: no directory) that
+  the running panel does NOT read — editing that one does nothing.
+  `pkill -x wf-panel-pi` is enough to reload; `lwrespawn` restarts it.
+- The gen1 games (battleship, letters, memory, paint, sequence, simon) are still
+  installed there under bare `<id>.desktop` names. Left alone; they no longer
+  appear on the taskbar but are still in the applications menu.
+- **GOTCHA — do not rsync to `10.118.25.17`.** The Pi is dual-homed: `eth0` on
+  TRUSTED and `wlan0` still on the LAN as `192.168.1.197`. A laptop on the LAN
+  reaches it *through* OPNsense, but the Pi replies straight out `wlan0`
+  (`ip route get 192.168.1.135` → `dev wlan0`), so pf sees one direction only,
+  cannot track the peer's window, and drops once the sender exceeds the initial
+  window. ssh, ping and `mkdir` work; a bulk transfer moved 36 KB in ten minutes
+  and hung. VERIFIED 2026-08-25. Either deploy to `192.168.1.197` (7-8 MB/s) or
+  take `wlan0` down so TRUSTED is the only path.
+
+## The chess piece set, redrawn (2026-08-25)
+
+Redrawn against a reference Staunton set the owner supplied. `src/pieces.gd` is
+still the single source: path data in a 100x100 box, tessellated for the screen
+and exported to `assets/pieces/*.svg` by `make chess-pieces-repo`.
+
+**The bug that was actually making the pieces look wrong:** `to_svg()` never
+emitted the `circles` array. The drawn set has a ball on the pawn, a finial on
+the bishop and five pearls on the queen; the EXPORTED set had none of them, and
+a committed set shadows the drawn one — so the game shipped headless pawns while
+every test and every in-editor run looked correct. Fixed; circles are emitted
+first, ahead of the fills.
+
+What changed in the artwork, and why, in case it is ever revisited:
+
+- **Contrast at the joint** is the governing rule. Where two parts are within a
+  few units of the same width they fuse at board size and the piece loses its
+  name. Every neck is now much narrower than what sits on it.
+- **Knight**: rebuilt four times before it stopped reading as a dog. What fixed
+  it, in order of effect — the head is BIG (head and neck are one mass filling
+  the upper square); ONE ear, not two peaks; the face is a steep DISHED diagonal
+  to a blunt nose at the far left; and a throat notch cut as a wedge. It was
+  traced from the reference, not drawn from memory, which is what the four
+  failures were.
+- **King**: the reference's figure-eight crown is a STROKE, not fills. Two
+  overlapping filled ellipses is the obvious approach and gives two eggs — fills
+  have no holes. A stroke can cross itself, and the crossing is the shape.
+- **Base**: `BASE`/`BASE_WIDE` widened and given a lip.
+
+**The icon is now GENERATED** from the same knight — `ChessPieces.to_icon_svg()`,
+written by `make chess-pieces-repo` alongside the set (repo dumps only; a
+user:// dump must not reach into res://). It was hand-drawn before and had
+drifted a whole redesign behind the piece it was traced from. `tests/run.gd`
+holds it to the same drift rule as the pieces. After changing it, regenerate the
+splash: `./tools/new_game.sh --regen-splash chess`.
+
+Iterating on this artwork means LOOKING at it. Godot rasterises SVG headless via
+`Image.load_svg_from_string`, so a throwaway `SceneTree` script that blits the
+twelve files onto a board and saves a PNG is the whole feedback loop — no
+rasteriser needs installing, and it renders through the same code path the game
+uses. Scale is relative to the file's own intrinsic size (312x356), not to the
+viewBox.
+
+## Taskbar icons on the Pi (2026-08-25)
+
+While a game was open the panel showed a generic placeholder instead of the
+game's icon. The window-list matches a window back to its launcher by Wayland
+app_id, and the generated `.desktop` files carried no `StartupWMClass`.
+
+**Godot sets the app_id to `application/config/name` VERBATIM** — measured, not
+assumed: `WAYLAND_DEBUG=1 ./chess` on the Pi prints
+`xdg_toplevel#51.set_app_id("Chess")`. Capital letter, and "Memory Match" keeps
+its space. `tools/install.sh` now writes `StartupWMClass=$name` (the `name` from
+`meta`, NOT the `id`). Verified by screenshot on the Pi.
+
+`WAYLAND_DEBUG=1` is the tool for any question of this shape — it dumps every
+protocol request, and no inspection utility (`lswt`, `wlrctl`, `wayland-info`)
+is installed on the Pi.
+
+## Framerate on the Pi (2026-08-25)
+
+Maximizing the window dropped every game to 20–27 fps on the Pi 4. All five now
+hold a vsync-locked 60. Measured on the shipped arm64 exports, maximized on the
+1080p panel, median of the per-second `[qdebug]` samples:
+
+| game | before | after |
+|---|---|---|
+| chess | 21 | **60** in play, 57–59 on the New-game card |
+| memory | 26 | **60** |
+| notes | 20 | **60** |
+| paint | 21 | **60** at rest and while drawing |
+| sequence | 27 | **60** |
+
+**Chess is not actually the heaviest — that was a measurement artefact.** In play
+it is a flat 60 fps / 16.7 ms with zero variance across 18 samples. The only
+screen that dips is the modal New-game card, which lays a full-screen alpha
+dimmer over the whole board; that is a screen you look at for two seconds.
+
+It read as "the heaviest" because it was the only game whose benchmark ran on a
+modal dialog — the Pi has no way to inject a click, so the game could not be
+measured in play at all. `--bench` (see `BENCH_FLAG` in `games/chess/src/main.gd`)
+now deals a game immediately and closes that gap permanently. Use it before
+concluding anything about this game's cost.
+
+**Root cause.** Frame time is proportional to the window's PIXEL COUNT and to
+essentially nothing else — ~18.9 ms per megapixel through Godot's
+`gl_compatibility` 2D path on V3D, established by sweeping the display mode with
+`wlr-randr` and watching frame time track it linearly from 0.92 Mpx (16.7 ms) to
+2.07 Mpx (39.2 ms). The old 1280x720 window was 0.92 Mpx and comfortably at 60; a
+maximized 1920x1053 window is 2.02 Mpx and cannot reach it however little is
+drawn. Maximizing is what tripped it.
+
+**Three changes, all needed:**
+
+1. **Full-screen background `ColorRect` → `RenderingServer.set_default_clear_color()`,
+   in all five games.** A ColorRect is a canvas item — every frame the GPU
+   rasterises and alpha-blends one quad over the whole window. A clear is free on
+   a tile-based GPU. One flat-coloured quad cost 9 ms of a 38 ms frame.
+   `project.godot` carries `environment/defaults/default_clear_color` so the
+   frames before `_ready()` match; `src/main.gd` re-asserts it from the colour
+   constant, which stays the source of truth. Chess had the same thing as a
+   `draw_rect()` over its whole control; that `_draw()` is gone.
+2. **Renderer → Forward Mobile (Vulkan)** on desktop/Pi. Roughly 2x the 2D
+   throughput at no image-quality cost. `renderer/rendering_method.mobile` (the
+   ANDROID override) stays `gl_compatibility`, so Android is untouched.
+   **Safe where Vulkan is absent** — VERIFIED by pointing `VK_DRIVER_FILES` at a
+   nonexistent ICD: the game logs "switching to OpenGLES", comes up on the
+   Compatibility renderer and keeps running.
+3. **`window/stretch/mode="viewport"`**, so the design resolution is what gets
+   rasterised and the window is reached by one cheap blit. memory and sequence
+   hold 60 at 1280x720; **chess, notes and paint needed their design resolution
+   dropped to 1024x576** (exactly 16:9, nothing distorts) to get there. Those
+   three now draw their interface ~25% larger relative to the screen and upscale
+   1.875x rather than 1.5x. Screenshotted on the Pi: nothing clips, paint's
+   toolbar wraps to two rows, which is what its `HFlowContainer` is for.
+
+**The cost is softness, and notes is where it shows** — it is a text editor being
+bilinear-upscaled. If crispness matters more there than a locked 60, put
+`viewport_width/height` back to 1280x720 (48 fps) or `stretch/mode` back to
+`"disabled"` (39 fps). Both measured.
+
+**notes overrides the stretch mode on Android** (`window/stretch/mode.android="disabled"`).
+This is not cosmetic: with any stretch mode on, the logical viewport is a fixed
+width whatever the screen is, so every width test reads that fixed width and
+`_split_allowed()` in `src/main.gd` stops being responsive — which is the reason
+stretch was off in that game to begin with. The desktop wants the framerate and a
+phone wants the responsiveness, so the two are split rather than traded.
+
+**Ruled out, each by measurement:**
+- **The `EGL 12297` error is benign.** The GL path resolves to a real hardware
+  `OpenGL ES 3.1 Mesa 25.0.7 — V3D 4.2.14.0` context. Desktop GL 3.3 does not
+  exist on V3D, so the GLES fallback is correct, not a degradation.
+- **Not the compositor**: `vkcube` at 1900x1000 holds 58 fps vsynced on the same
+  output. **Not vsync**: `--disable-vsync`, mailbox and adaptive all measure the
+  same, and "FIFO protocol not found" is a red herring. **Not CPU or redraw
+  storms**: 15–25% of one core, main thread parked in a GPU fence wait. **Not
+  content**: chess draws far more than memory and was only 20% slower.
+
+**Gotchas for anyone measuring this again:**
+- **Godot buffers stdout when it is not a TTY, and flushes on exit** — so a game
+  you `pkill` prints NOTHING. Run it under `stdbuf -oL`. The readout simply looks
+  broken otherwise.
+- The stdout readout needs BOTH `QGAMES_DEBUG_HUD=on` and
+  `QGAMES_DEBUG_HUD_STDOUT=true` in a release build; `hud_stdout` alone is silent
+  because a shipped export starts the HUD off.
+- **First run on Vulkan builds a pipeline cache and is not representative** —
+  chess and notes produced no samples at all in a 26-second window. Discard it.
+- **`pkill -x` is not enough between runs.** Chess ignores SIGTERM long enough to
+  outlive the pause and sit on top of the next game, which then renders
+  unpresented and reports nonsense (105 fps at 9.6 ms was one such reading).
+  SIGKILL and then PROVE nothing survived — and note that
+  `pgrep -x chess,memory,notes,paint,sequence` silently matches NOTHING, because
+  that is one 31-character pattern, not five names. Loop over the names.
+- V3D returns garbage from GPU timer queries, so `--gpu-profile` is useless here.
+  The per-pixel cost above is empirical; WHY Godot's GL path is ~9x slower per
+  pixel than `vkcube` on the same GPU was never established, and that gap is
+  honest rather than closed.
+- **Measure chess with `--bench`, not on its opening screen.** Its New-game card
+  is a full-screen alpha dimmer over the board and reads 2–3 fps below the game
+  itself, with much wider variance (the card fades in on a tween, so short runs
+  catch the fade). Benchmarking a modal dialog is what made chess look like the
+  slow one for a whole afternoon.
+
+## Chess: what the per-frame trim actually found (2026-08-25)
+
+Asked "why is chess the heaviest, can we trim it", the answer turned out to be
+that it is not — see above. It did surface two pieces of genuine per-frame waste,
+both now fixed, both worth about 1 fps on the card and nothing at all in play:
+
+- **`_fit_setup()` and `_fit_buttons()` ran on EVERY frame, for ever.** The
+  reason they existed is sound — a container's combined minimum size is not
+  final until its children have been laid out, so a single deferred call after
+  building one reads a stale answer, and the "New game" button really did end up
+  half off the bottom edge. Running them for ever was the fix. They now run until
+  they SETTLE: each pass reports whether it changed anything, refills the budget
+  if it did, and `_relayout()` / `_show_setup()` refill it too. Strictly more
+  robust than the single deferred call, because it keeps going until the answer
+  stops moving rather than guessing how many frames that takes.
+  MEASURED with a temporary switch that disabled both: 59 -> 60 median on the
+  card, floor 56 -> 58. Verified by screenshot that the setup card still lays out
+  in three columns and the button row still reserves two rows.
+- **`_refresh_clocks()` wrote both clock colours unconditionally, every frame.**
+  `Label.set_text` early-outs on an identical string, but
+  `add_theme_color_override` does not — it fires a theme-changed notification
+  that dirties the label and walks its parents. That was 120 notifications a
+  second to display a string that changes about once a second. Now guarded on the
+  low/normal state actually flipping.
+
+## Paint was unplayable on the Pi — it was the undo snapshot (2026-08-25)
+
+Reported as "so sluggish it was unplayable". It was not the framerate: paint
+idles at a locked 60. It was a **116 ms freeze on every stroke release**.
+
+`PaintCanvas.end_stroke()` snapshots the picture for undo, and that snapshot was
+`image.save_png_to_buffer()`. PNG is the wrong codec for this: it filters every
+row before deflating. MEASURED on the Pi 4, 1280x720 RGBA8 (3.6 MB), on a
+scribbled canvas rather than a blank one — a blank canvas flatters every codec:
+
+| codec | encode | decode | size |
+|---|---|---|---|
+| PNG | **116.0 ms** | 17.3 ms | 62 KB |
+| ZSTD | **7.0 ms** | 4.2 ms | 76 KB |
+| FastLZ | 8.1 ms | 11.0 ms | 115 KB |
+
+Now `get_data().compress(COMPRESSION_ZSTD)` — 16x faster to write, 4x faster to
+read back, 23% larger. The size costs nothing real: `MAX_STEPS` (24) binds long
+before `MAX_BYTES` (8 MB) at either size. `save_png()` and `publish_png()` still
+write real PNGs; they are file/telemetry paths, not the hot one.
+
+A history entry is now `{data, w, h, raw}` rather than a bare buffer. The
+dimensions travel WITH the snapshot because decompression needs the exact byte
+count and `resize()` can change it between snapshots — a bare buffer would have
+failed to restore after a window resize, silently, and only for someone who had
+resized.
+
+### ...and then it was still slow, and that was the UPLOAD SHAPE
+
+Fixing the snapshot was necessary and not sufficient: paint was still 5 fps while
+drawing. The picture lives in one Image on the CPU and has to reach the GPU, and
+**Godot cannot update part of a texture** — `ImageTexture.update()` always sends
+the whole thing. One texture for the whole canvas therefore means re-sending
+3.6 MB on every frame of a drag.
+
+MEASURED on the Pi 4, same binary, same synthetic drag, only the upload shape and
+the renderer differing:
+
+| upload shape | Vulkan, drawing | Compatibility, drawing |
+|---|---|---|
+| whole canvas (3.6 MB) | **5 fps**, 190 ms, cpu 107% | 49 fps, 20 ms |
+| one texture + a patch | 29 fps, floor 14 | — |
+| **tile grid (256 KB)** | **60 fps, floor 58** | — |
+
+The cost scales with BYTES — proved by uploading a fixed 256 KB region instead of
+the whole canvas and watching the same drag go from 5 fps to 60. So this was
+never really a renderer choice; paint spent an afternoon on `gl_compatibility`
+before the actual fix landed, and is back on Vulkan with the others.
+
+**The design, and it is the one Windows XP's Paint used.** GDI kept the picture
+in a bitmap, mutated it in place, and then `InvalidateRect` + `BitBlt`ed ONLY the
+rectangle that changed — a few hundred pixels for a brush stroke. Same idea here:
+the canvas reaches the GPU as a grid of 256px tiles, a dab dirties one or two,
+and only those are re-sent. The quantisation to a grid is the concession to
+Godot: GDI could blit an arbitrary rectangle into a DC, and `ImageTexture` cannot,
+so the dirty rect is rounded out to tiles instead.
+
+**The rejected middle option is worth knowing about**, because it looks cleverer
+and is worse: keep one big texture, upload the region changed since the last full
+refresh, draw it over the top. It measures 29 fps with a floor of 14, because
+that region is a BOUNDING BOX — it grows as the stroke travels, and once it
+passes about a third of the canvas a full upload is cheaper again, so every later
+frame of a long stroke pays for one. A tile's cost does not depend on how far the
+stroke has gone. That is the property worth having.
+
+Two things that follow from tiles and are easy to get wrong:
+- **Nothing needs refreshing when a stroke ends.** Every dab already marked the
+  tiles it touched and they were uploaded on the frame it happened. An earlier
+  version refreshed everything at stroke end and it cost 16 fps off the floor for
+  nothing.
+- **Tile rects are placed from integer canvas coordinates**, so one tile's right
+  edge lands on exactly the float its neighbour starts at and the grid cannot
+  seam. Verified by screenshot on a long diagonal stroke crossing many tiles.
+
+**The trap that made this hard to see: `ImageTexture.update()` only QUEUES the
+upload.** Timed from GDScript it reads 3.4 ms on BOTH renderers, because the real
+work happens on the render thread — which is why the process showed over 100%
+CPU. An earlier note in this file wrongly concluded from that number that the
+upload "is not felt on its own". If a frame costs 190 ms and the parts you can
+time add up to 4 ms, the cost is on another thread; do not go looking for it in
+the script.
+
+**What could NOT be taken from XP Paint: it had no frame loop at all.** A GDI
+window repaints only when something invalidates it, so idle cost was zero. Godot
+renders the main window every frame unconditionally and has no on-demand mode for
+it, which is why paint still burns ~45% of a core sitting still. That is a Godot
+limitation, not something the game can fix.
+
+NOT a staging-buffer tuning problem: `texture_upload_region_size_px` 64 -> 1024
+and `block_size_kb` 256 -> 4096 changed nothing. Tested and reverted.
+
+**`--paintdrag`** drives a drag through the real drawing path so the HUD reports
+the framerate WHILE DRAWING. The Pi cannot inject a pointer event, and drawing is
+the only expensive thing this game does — measuring it at rest says nothing, and
+measuring it at rest is exactly how this went unnoticed for a day.
+
+**Measurement note:** two wrong numbers came out of this investigation before a
+right one — "212 ms per drag frame" (the loop drew a 1000-pixel stroke every
+frame, which no drag does) and "3.47 ms per upload" (the enqueue, not the work).
+Both came from benchmarking something that was not the real path.
+
+## Chess: the capture animation ghosted (2026-08-25)
+
+`_draw()` drew a captured piece with `_pop_rect(square_rect(sq), 1.0)`. At
+`t = 1.0` that function's factor works out to exactly `1.0` —
+`lerpf(0.55, 1.0, 1.0) + 0.10 * sin(PI)` — so the call was a no-op and the taken
+piece sat at FULL SIZE, dissolving on the spot. `CAPTURE_SEC` (0.22) was also
+LONGER than `MOVE_SEC` (0.20), so it was still visible underneath the capturing
+piece after that piece had landed. Two full-size pieces on one square is what
+read as a ghost.
+
+Now `_capture_rect()` collapses it to 0.52 of full size, eased out so most of the
+shrink happens in the first third, with `_capture_alpha()` fading as `(1-t)^2` —
+faster than linear, because a straight fade leaves the piece at half opacity
+exactly when the capturing piece is halfway across it. `CAPTURE_SEC` is 0.16, so
+the square is clear before the arriving piece lands.
+
+Verified by rendering the sequence as a filmstrip: a throwaway `SceneTree` script
+that rasterises the piece SVGs at the scale and alpha the code computes for a
+series of `t`, and blits them onto a square. Animation curves can be LOOKED at
+without a display; there is no need to guess at them.
 
 ## Open threads
 
