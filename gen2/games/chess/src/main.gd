@@ -41,6 +41,15 @@ var _top_name: Label = null
 var _top_clock: Label = null
 var _bottom_name: Label = null
 var _bottom_clock: Label = null
+
+## Which colour each clock is currently showing: -1 unknown, 0 normal, 1 low.
+## `Label.set_text` already early-outs on an identical string, but
+## `add_theme_color_override` does not — it fires a theme-changed notification
+## that dirties the label and walks its parents. _refresh_clocks() runs every
+## frame and the clock changes about once a second, so writing both overrides
+## unconditionally meant 120 of those notifications a second to say nothing.
+var _top_clock_low: int = -1
+var _bottom_clock_low: int = -1
 var _status: Label = null
 var _moves_list: ItemList = null
 var _btn_hint: Button = null
@@ -77,6 +86,14 @@ var _pref_sound: bool = true
 ## is discoverable by exactly the person who wants it.
 const DUMP_PIECES_FLAG: String = "--dump-pieces"
 
+## Skips the New-game card and deals a game immediately. Purely a measuring
+## tool: the Pi has no way to inject a click, so without this the only screen
+## that can be benchmarked is the modal dialog — which is the one screen that is
+## NOT representative, because it lays a full-screen dimmer over everything. It
+## is what established that chess holds a flat 60 fps in play while the setup
+## card sits at 59.
+const BENCH_FLAG: String = "--bench"
+
 
 func _game_ready() -> void:
 	var dump_to: String = _flag_value(DUMP_PIECES_FLAG)
@@ -97,6 +114,18 @@ func _game_ready() -> void:
 		else:
 			print("chess: wrote the piece set to ", where)
 			print("chess: edit the .svg files there and restart — nothing to rebuild")
+			# The icon is the knight, so it belongs to the same artwork and is
+			# rewritten in the same breath. Only for a REPOSITORY dump: a set
+			# written to user:// is somebody's own set, and nothing they do to
+			# it should reach into res:// and change the game's icon.
+			if repo:
+				var icon: FileAccess = FileAccess.open("res://icon.svg", FileAccess.WRITE)
+				if icon == null:
+					push_error("chess: could not write res://icon.svg")
+				else:
+					icon.store_string(ChessPieces.to_icon_svg())
+					icon.close()
+					print("chess: wrote res://icon.svg from the same knight")
 		quit_game()
 		return
 	_load_prefs()
@@ -116,7 +145,10 @@ func _game_ready() -> void:
 	_build_ui()
 	resized.connect(_relayout)
 	_relayout()
-	_show_setup()
+	if _flag_value(BENCH_FLAG) != "":
+		_start_game()
+	else:
+		_show_setup()
 
 
 func _flag_value(flag: String) -> String:
@@ -174,6 +206,18 @@ func _save_prefs() -> void:
 # ------------------------------------------------------------------ build UI
 
 func _build_ui() -> void:
+	# The background is the viewport's CLEAR COLOUR, not a full-screen ColorRect.
+	#
+	# They look identical and cost wildly different amounts. A ColorRect is a
+	# canvas item: every frame the GPU rasterises and alpha-blends one quad over
+	# the whole window. A clear is free on a tile-based GPU — it just marks the
+	# tile buffer, with no memory read at all. MEASURED on the Pi 4 (V3D 4.2,
+	# 1920x1053 maximized, gl_compatibility): one full-screen quad was costing
+	# 9 ms of a 38 ms frame, a third of the budget, to draw a flat colour.
+	#
+	# project.godot sets the same colour so the frames before _ready() match.
+	RenderingServer.set_default_clear_color(C_BG)
+
 	_board_view = ChessBoardView.new()
 	# Which artwork is in use is the first thing to establish about a
 	# screenshot, so it is said out loud rather than left to be worked out.
@@ -288,18 +332,16 @@ func _relayout() -> void:
 		_board_view.size = Vector2(size.x - PAD * 2.0, size.y - ph - PAD * 3.0)
 		_panel.position = Vector2(PAD, size.y - ph - PAD)
 		_panel.size = Vector2(size.x - PAD * 2.0, ph)
+	_arm_layout()
 	_fit_setup()
 	_fit_buttons.call_deferred()
 	queue_redraw()
 
 
-func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), C_BG)
-
-
 # ------------------------------------------------------------------ new game
 
 func _show_setup() -> void:
+	_arm_layout()
 	if _setup != null:
 		_setup.queue_free()
 	_setup = _build_setup()
@@ -413,7 +455,31 @@ const BUTTON_ROW_H: float = 38.0
 const BUTTON_ROW_GAP: float = 6.0
 
 
-func _fit_buttons() -> void:
+## Layout refits used to run on EVERY frame, for ever, for the reasons given in
+## _fit_setup() and _fit_buttons(): a container's combined minimum size is not
+## final until its children have been laid out, so a single deferred call after
+## building one reads a stale answer. Running for ever is a big hammer for a
+## problem that lasts a few frames.
+##
+## They now run until they SETTLE. Each pass reports whether it changed anything
+## and refills the budget if it did, and anything that can invalidate a layout —
+## a resize, a new setup card — refills it too. That is strictly more robust than
+## the single deferred call this replaces, because it keeps going until the
+## answer stops moving instead of guessing how long that takes.
+##
+## MEASURED on the Pi 4: worth about 1 fps on the New-game screen and it lifts
+## the floor from 56 to 58. Small — chess is already a flat 60 in play — but it
+## is pure waste otherwise.
+const LAYOUT_SETTLE_FRAMES: int = 4
+
+var _layout_settle: int = LAYOUT_SETTLE_FRAMES
+
+
+func _arm_layout() -> void:
+	_layout_settle = LAYOUT_SETTLE_FRAMES
+
+
+func _fit_buttons() -> bool:
 	## An HFlowContainer reports the height of ONE row as its minimum, whatever
 	## it actually wraps to — width is not known when minimum sizes are asked
 	## for. So the VBox above it hands out one row's worth of space and the
@@ -421,11 +487,13 @@ func _fit_buttons() -> void:
 	## game" button was half off the bottom edge. get_line_count() knows the
 	## answer once the layout has run, so the minimum is corrected afterwards.
 	if _buttons == null:
-		return
+		return false
 	var lines: int = maxi(_buttons.get_line_count(), 1)
 	var wanted: float = lines * BUTTON_ROW_H + (lines - 1) * BUTTON_ROW_GAP
-	if not is_equal_approx(_buttons.custom_minimum_size.y, wanted):
-		_buttons.custom_minimum_size.y = wanted
+	if is_equal_approx(_buttons.custom_minimum_size.y, wanted):
+		return false
+	_buttons.custom_minimum_size.y = wanted
+	return true
 
 
 func _group(title: String) -> VBoxContainer:
@@ -445,13 +513,14 @@ const SETUP_COLUMN_WIDTHS: Array[float] = [630.0, 411.0, 0.0]
 const SETUP_SHORT_HEIGHT: float = 640.0
 
 
-func _fit_setup() -> void:
+func _fit_setup() -> bool:
 	## A ScrollContainer reports no minimum height of its own, so the card
 	## would collapse inside a CenterContainer. Give it exactly the height its
 	## content wants, capped at what the screen has — and lay the groups out in
 	## as many columns as the width allows first, so that height is smaller.
 	if _setup_scroll == null or _setup_box == null:
-		return
+		return false
+	var moved: bool = false
 	if _setup_groups != null:
 		var want_columns: float = 0.0
 		if size.y < SETUP_SHORT_HEIGHT:
@@ -461,9 +530,13 @@ func _fit_setup() -> void:
 					break
 		if _setup_groups.custom_minimum_size.x != want_columns:
 			_setup_groups.custom_minimum_size.x = want_columns
+			moved = true
 	var wanted: Vector2 = _setup_box.get_combined_minimum_size()
-	_setup_scroll.custom_minimum_size = Vector2(wanted.x,
-			minf(wanted.y, maxf(size.y - 96.0, 160.0)))
+	var target := Vector2(wanted.x, minf(wanted.y, maxf(size.y - 96.0, 160.0)))
+	if not _setup_scroll.custom_minimum_size.is_equal_approx(target):
+		_setup_scroll.custom_minimum_size = target
+		moved = true
+	return moved
 
 
 ## How long an overlay takes to appear. Long enough to read as a panel arriving
@@ -551,12 +624,16 @@ func _process(delta: float) -> void:
 	# after building it is not enough — a container's combined minimum size is
 	# not final until its children have been laid out, and the first answer
 	# came back short enough to hide the Start button behind a scrollbar.
-	if _setup != null:
-		_fit_setup()
-	# Same reason as the setup card: get_line_count() is only right after a
-	# layout pass, and a single deferred call after a resize can still read the
-	# pre-wrap answer.
-	_fit_buttons()
+	if _layout_settle > 0:
+		var moved: bool = false
+		if _setup != null:
+			moved = _fit_setup()
+		# Same reason as the setup card: get_line_count() is only right after a
+		# layout pass, and a single deferred call after a resize can still read
+		# the pre-wrap answer.
+		if _fit_buttons():
+			moved = true
+		_layout_settle = LAYOUT_SETTLE_FRAMES if moved else _layout_settle - 1
 	if _game == null:
 		return
 	if not _game.over and _game.clock.tick(delta):
@@ -849,15 +926,31 @@ func _refresh_clocks() -> void:
 	if _game.clock.is_unlimited():
 		_top_clock.text = "—"
 		_bottom_clock.text = "—"
+		_set_clock_low(_top_clock, false, true)
+		_set_clock_low(_bottom_clock, false, false)
 		return
 	var computer_ms: int = _game.clock.ms_left(_game.computer_side())
 	var human_ms: int = _game.clock.ms_left(_game.human_side)
 	_top_clock.text = ChessClock.format(computer_ms)
 	_bottom_clock.text = ChessClock.format(human_ms)
-	_top_clock.add_theme_color_override("font_color",
-			C_CLOCK_LOW if computer_ms < CLOCK_WARN_MS else C_TEXT)
-	_bottom_clock.add_theme_color_override("font_color",
-			C_CLOCK_LOW if human_ms < CLOCK_WARN_MS else C_TEXT)
+	_set_clock_low(_top_clock, computer_ms < CLOCK_WARN_MS, true)
+	_set_clock_low(_bottom_clock, human_ms < CLOCK_WARN_MS, false)
+
+
+func _set_clock_low(label: Label, low: bool, top: bool) -> void:
+	## Only touches the theme when the state actually flips. -1 means "not set
+	## yet", so the first call always paints and the label never starts life
+	## with whatever colour it was built with by accident.
+	var want: int = 1 if low else 0
+	if top:
+		if _top_clock_low == want:
+			return
+		_top_clock_low = want
+	else:
+		if _bottom_clock_low == want:
+			return
+		_bottom_clock_low = want
+	label.add_theme_color_override("font_color", C_CLOCK_LOW if low else C_TEXT)
 
 
 func _refresh_moves() -> void:

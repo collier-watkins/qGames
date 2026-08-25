@@ -917,3 +917,21 @@ func _test_repo_piece_set_ships() -> void:
 			+ (" — run 'make chess-pieces-repo' (%s)" % ", ".join(drifted) if drifted.size() > 0 else ""),
 			drifted.is_empty())
 	_check("hand-edited pieces are left alone by that check", mine >= 0)
+
+	# The icon is the knight, generated from the same artwork. It used to be
+	# drawn by hand beside the pieces and drifted a whole redesign behind them,
+	# so it is held to the same rule: if it still carries the generated mark it
+	# has to match what the drawn set produces today.
+	var icon_path: String = "res://icon.svg"
+	if FileAccess.file_exists(icon_path):
+		var icon: String = FileAccess.open(icon_path, FileAccess.READ).get_as_text()
+		if icon.contains(ChessPieces.GENERATED_MARK):
+			_check("the icon matches the knight it was generated from"
+					+ " — run 'make chess-pieces-repo'",
+					icon == ChessPieces.to_icon_svg())
+		else:
+			_check("a hand-edited icon is left alone by that check", true)
+		var icon_img := Image.new()
+		_check("the icon is valid SVG the engine can rasterise",
+				icon_img.load_svg_from_string(ChessPieces.to_icon_svg(), 1.0) == OK
+				and icon_img.get_width() >= 8)

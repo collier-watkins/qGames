@@ -42,7 +42,11 @@ const DRAG_LIFT: float = 0.18
 ## child playing their first games needs more than an adult does.
 const MOVE_SEC: float = 0.20
 ## A taken piece fades rather than vanishing, so it is obvious what was lost.
-const CAPTURE_SEC: float = 0.22
+## SHORTER than MOVE_SEC on purpose. The taken piece has to be gone by the time
+## the capturing piece lands on it — run longer, and for the last fraction of a
+## second there are two pieces on one square and the whole thing reads as a
+## ghost rather than as a capture.
+const CAPTURE_SEC: float = 0.16
 ## A promoted piece swells into place. It is the one move where a piece becomes
 ## a different piece, and without this it simply blinks.
 const PROMOTE_SEC: float = 0.26
@@ -506,8 +510,8 @@ func _draw() -> void:
 
 	for fade: Dictionary in _fades:
 		var ft: float = float(fade["t"])
-		_draw_piece_at(int(fade["piece"]), _pop_rect(square_rect(int(fade["sq"])), 1.0),
-				1.0 - ft)
+		_draw_piece_at(int(fade["piece"]), _capture_rect(square_rect(int(fade["sq"])), ft),
+				_capture_alpha(ft))
 
 	for slide: Dictionary in _slides:
 		var a: Rect2 = square_rect(int(slide["from"]))
@@ -529,6 +533,28 @@ func _draw() -> void:
 			var s: float = _square * 1.06
 			var centre: Vector2 = _drag_pos - Vector2(0.0, _square * DRAG_LIFT)
 			_draw_piece_at(p2, Rect2(centre - Vector2(s, s) * 0.5, Vector2(s, s)))
+
+
+func _capture_rect(r: Rect2, t: float) -> Rect2:
+	## The taken piece COLLAPSES INTO its square. It used to call _pop_rect()
+	## with a constant t of 1.0 — and at t=1.0 that function's factor works out
+	## to exactly 1.0, so the piece sat at full size and only its alpha moved.
+	## A full-size piece dissolving in place, under a full-size piece sliding
+	## onto the same square, is what read as a ghost.
+	##
+	## Eased OUT, so it shrinks fast and then settles small: most of the
+	## movement happens in the first third, which is what clears the square
+	## before the capturing piece arrives.
+	var factor: float = lerpf(1.0, 0.52, _ease_out(t))
+	return Rect2(r.get_center() - r.size * factor * 0.5, r.size * factor)
+
+
+static func _capture_alpha(t: float) -> float:
+	## Slightly faster than linear. A straight fade leaves the piece at half
+	## opacity exactly when the capturing piece is halfway across it, which is
+	## the worst moment to still be visible.
+	var u: float = 1.0 - clampf(t, 0.0, 1.0)
+	return u * u
 
 
 func _pop_rect(r: Rect2, t: float) -> Rect2:
