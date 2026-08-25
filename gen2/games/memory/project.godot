@@ -66,11 +66,63 @@ QDebug="*res://addons/qcore/debug_hud.gd"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/size/resizable=true
-window/stretch/mode="canvas_items"
+; Start maximized. These run on a Pi wired to a TV/monitor where a 1280x720
+; window in the corner of a 1080p panel is just small — and the panel is at
+; the top, so maximized (not fullscreen) keeps the taskbar reachable.
+window/size/mode=2
+; Render at 1280x720 and scale that up to the window, rather than rasterising
+; every physical pixel ("canvas_items"). The game is authored at 1280x720 — see
+; viewport_width/height above — so this draws it at exactly the size it was
+; designed for and lets the GPU stretch the result.
+;
+; This is a Raspberry Pi fix with a real cost. On a Pi 4 (V3D 4.2) the 2D
+; fill rate through Godot's gl_compatibility path measures ~53 Mpixel/s, so a
+; maximized 1920x1053 window cannot be rasterised at 60 Hz no matter how little
+; is drawn on it — the frame time is proportional to the window's pixel count
+; and to nothing else. MEASURED, median over 30 samples, maximized on a 1080p
+; panel: 26 fps with canvas_items, 47 fps with this plus the clear-colour
+; background below. The cost is a 1.5x bilinear upscale: text is very slightly
+; soft at arm's length and indistinguishable at TV distance.
+;
+; "expand" still applies, so the viewport widens to the window's aspect
+; instead of letterboxing; layout code sees the same logical size it always did
+; and needs no change. content_scale_factor (Ctrl +/-, ui/scale) still
+; multiplies on top.
+window/stretch/mode="viewport"
 window/stretch/aspect="expand"
 window/handheld/orientation="sensor_landscape"
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
+; The window background. Set here so the frames between the boot splash and the
+; first _ready() are already this colour; src/main.gd re-asserts it at runtime
+; from C_BG, which is the source of truth, so the two cannot drift.
+; A clear costs nothing on a tile-based GPU; the full-screen ColorRect this
+; replaced cost 9 ms/frame on the Pi 4. See src/main.gd _build_ui().
+environment/defaults/default_clear_color=Color(0.098, 0.1373, 0.2353, 1)
+
+; Vulkan on desktop and on the Pi; Android deliberately left on Compatibility.
+;
+; The Stack table calls Compatibility the choice, and for a 2D game it looks
+; like the obvious one. On the Raspberry Pi it is the wrong one. Frame time
+; through Godot's gl_compatibility 2D path on V3D is proportional to the
+; window's PIXEL COUNT and to nothing else — ~18.9 ms per megapixel, measured
+; by sweeping the display mode with wlr-randr — so a maximized 1920x1053 window
+; cannot reach 60 Hz however little is drawn on it. MEASURED on the Pi 4,
+; median of 30 samples, at full resolution with no upscaling:
+;
+;     chess 25 -> 40    memory 47 -> 60    notes 25 -> 139
+;     paint 30 -> 40    sequence 37 -> 39
+;
+; The EGL 12297 error in the log is a red herring and so is the vsync warning:
+; the GL path resolves to a real hardware GLES 3.1 context on V3D. It is simply
+; slower than the RenderingDevice path here.
+;
+; `renderer/rendering_method.mobile` is the ANDROID/iOS override and is left at
+; gl_compatibility on purpose — the mobile renderer needs Vulkan, no Android
+; target has been tested, and Android is a stated platform. Nothing about the
+; Android build changes.
+;
+; Costs, honestly: +18 MB RSS, and a desktop with no Vulkan driver is untested.
+renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="gl_compatibility"

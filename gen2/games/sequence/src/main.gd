@@ -515,11 +515,17 @@ func _game_ready() -> void:
 
 
 func _build_ui() -> void:
-	var bg := ColorRect.new()
-	bg.color = C_BG
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	# The background is the viewport's CLEAR COLOUR, not a full-screen ColorRect.
+	#
+	# They look identical and cost wildly different amounts. A ColorRect is a
+	# canvas item: every frame the GPU rasterises and alpha-blends one quad over
+	# the whole window. A clear is free on a tile-based GPU — it just marks the
+	# tile buffer, with no memory read at all. MEASURED on the Pi 4 (V3D 4.2,
+	# 1920x1053 maximized, gl_compatibility): one full-screen quad was costing
+	# 9 ms of a 38 ms frame, a third of the budget, to draw a flat colour.
+	#
+	# project.godot sets the same colour so the frames before _ready() match.
+	RenderingServer.set_default_clear_color(C_BG)
 
 	strip = SequenceStrip.new()
 	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE

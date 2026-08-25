@@ -48,6 +48,7 @@ func _ready() -> void:
 	# ourselves. Explicit beats implicit here, and `resized` still fires for
 	# games, so per-game layout code is unchanged.
 	set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_apply_window_mode()
 	safe_area = DisplayServer.get_display_safe_area()
 	# Scale BEFORE the first sync, so a game lays out against the size it will
 	# actually have rather than laying out twice and flashing.
@@ -56,6 +57,30 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_sync_to_viewport)
 	_build_scale_toast()
 	_game_ready()
+
+
+## Re-assert the window mode the project asked for.
+##
+## `display/window/size/mode=2` (Maximized) is set in every game's
+## project.godot, but it is not honoured by every backend: on Wayland under
+## labwc (Raspberry Pi OS trixie) the window still comes up windowed at the
+## 1280x720 viewport size. Asking again once the window exists is a no-op
+## where the setting already worked, and is the only thing that works where it
+## did not — so it is done unconditionally rather than behind an OS check.
+##
+## Read from ProjectSettings rather than hard-coded so project.godot stays the
+## single place the intent is expressed.
+func _apply_window_mode() -> void:
+	if OS.has_feature("mobile") or OS.has_feature("web"):
+		return
+	var wanted: int = int(ProjectSettings.get_setting(
+			"display/window/size/mode", DisplayServer.WINDOW_MODE_WINDOWED))
+	if wanted != DisplayServer.WINDOW_MODE_MAXIMIZED:
+		return
+	var window: Window = get_window()
+	if window == null or window.mode != Window.MODE_WINDOWED:
+		return
+	window.mode = Window.MODE_MAXIMIZED
 
 
 func _load_ui_scale() -> void:

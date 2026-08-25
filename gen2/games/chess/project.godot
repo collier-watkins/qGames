@@ -63,14 +63,80 @@ QDebug="*res://addons/qcore/debug_hud.gd"
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
+; Design resolution 1024x576, not 1280x720 - deliberately, for framerate.
+;
+; With window/stretch/mode="viewport" below, THIS is the number of pixels Godot
+; actually rasterises each frame; the window's 1920x1053 is reached by one cheap
+; blit. On a Pi 4 the 2D rasteriser is the whole bottleneck, so this value is the
+; framerate dial. MEASURED on the shipped arm64 export, maximized on a 1080p
+; panel, median of 25 samples: 48 fps / 20.8 ms at 1280x720, and 60 fps / 16.7 ms
+; (vsync-locked) at 1024x576. memory and sequence are light enough to hold 60 at
+; 1280x720 and are left there; this game is not.
+;
+; 1024x576 is exactly 16:9, so nothing is distorted. The trade is that logical
+; pixels are bigger relative to the screen - every font size and margin here is
+; in logical px, so the whole interface comes out ~25% larger, and the upscale
+; to the panel is 1.875x rather than 1.5x. Verified by screenshot that no layout
+; overflows at this size.
+window/size/viewport_width=1024
+window/size/viewport_height=576
 window/size/resizable=true
-window/stretch/mode="canvas_items"
+; Start maximized. These run on a Pi wired to a TV/monitor where a 1280x720
+; window in the corner of a 1080p panel is just small — and the panel is at
+; the top, so maximized (not fullscreen) keeps the taskbar reachable.
+window/size/mode=2
+; Render at 1024x576 (see viewport_width/height above) and scale it up to the window, rather than rasterising
+; every physical pixel. The game is authored at 1280x720 — see
+; viewport_width/height above — so this draws it at exactly the size it was
+; designed for and lets the GPU stretch the result.
+;
+; This is the second half of the Raspberry Pi framerate fix; the Vulkan renderer
+; below is the first. Godot's 2D canvas rasteriser is the bottleneck on a Pi 4
+; (V3D 4.2) and its cost is proportional to the window's pixel count and almost
+; nothing else — a maximized 1920x1053 window is 2.02 Mpixel and cannot be
+; rasterised at 60 Hz however little is drawn on it. Scaling a 0.92 Mpixel
+; viewport up costs one cheap opaque blit and rasterises 2.2x fewer pixels.
+; MEASURED — see the framerate table in PROJECT_STATE.md.
+;
+; "expand" keeps the viewport widening to the window's aspect instead of
+; letterboxing, so layout code sees the logical size it always did and needs no
+; change. content_scale_factor (Ctrl +/-, ui/scale) still multiplies on top.
+; The cost is a 1.5x bilinear upscale: text is very slightly soft close up.
+window/stretch/mode="viewport"
 window/stretch/aspect="expand"
 window/handheld/orientation="sensor_landscape"
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
+; The window background. Set here so the frames between the boot splash and
+; the first _ready() are already this colour; src/main.gd re-asserts it at
+; runtime from the colour constant, which is the source of truth, so the two
+; cannot drift. A clear costs nothing on a tile-based GPU; the full-screen
+; quad it replaced cost 9 ms/frame on the Pi 4. See src/main.gd _build_ui().
+environment/defaults/default_clear_color=Color(0.098, 0.1373, 0.2353, 1)
+
+; Vulkan on desktop and on the Pi; Android deliberately left on Compatibility.
+;
+; The Stack table calls Compatibility the choice, and for a 2D game it looks
+; like the obvious one. On the Raspberry Pi it is the wrong one. Frame time
+; through Godot's gl_compatibility 2D path on V3D is proportional to the
+; window's PIXEL COUNT and to nothing else — ~18.9 ms per megapixel, measured
+; by sweeping the display mode with wlr-randr — so a maximized 1920x1053 window
+; cannot reach 60 Hz however little is drawn on it. MEASURED on the Pi 4,
+; median of 30 samples, at full resolution with no upscaling:
+;
+;     chess 25 -> 40    memory 47 -> 60    notes 25 -> 139
+;     paint 30 -> 40    sequence 37 -> 39
+;
+; The EGL 12297 error in the log is a red herring and so is the vsync warning:
+; the GL path resolves to a real hardware GLES 3.1 context on V3D. It is simply
+; slower than the RenderingDevice path here.
+;
+; `renderer/rendering_method.mobile` is the ANDROID/iOS override and is left at
+; gl_compatibility on purpose — the mobile renderer needs Vulkan, no Android
+; target has been tested, and Android is a stated platform. Nothing about the
+; Android build changes.
+;
+; Costs, honestly: +18 MB RSS, and a desktop with no Vulkan driver is untested.
+renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="gl_compatibility"
