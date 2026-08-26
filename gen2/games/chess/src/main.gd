@@ -330,6 +330,50 @@ func _make_button(text: String, handler: Callable) -> Button:
 	return b
 
 
+## The one button a child has to find. Everything else on the setup card is the
+## engine's default grey, so colour is the whole signal — a four-year-old who
+## cannot read "Start" can still be told to press the green one.
+##
+## The label is C_BG — the dark navy — and NOT white. That is the part worth
+## writing down, because white is the intuitive choice and it is the worst of
+## the three on offer. MEASURED, WCAG 2.x contrast against C_GOOD: navy 6.74:1
+## (AA pass), white 2.31:1 (fail), and C_TEXT — the colour every other label on
+## the card uses — 1.88:1, worse still. C_GOOD is a bright mid-green, and bright
+## backgrounds want dark text.
+##
+## There is no automated guard on those numbers. main.gd names the QConfig
+## autoload, so the headless suite cannot load it at all (the same constraint
+## src/uci.gd documents), which puts ChessView's palette out of reach of
+## tests/run.gd. Moving the colours into a dependency-free src/palette.gd would
+## fix that and is the obvious next step if the palette starts moving.
+##
+## `focus` is a transparent box with a border rather than a filled one, because
+## Godot draws the focus style OVER the normal style: filling it would repaint
+## the green flat and lose the pressed/hover shading underneath.
+func _make_primary_button(text: String, handler: Callable) -> Button:
+	var b := _make_button(text, handler)
+	for spec: Array in [["normal", C_GOOD], ["hover", C_GOOD.lightened(0.12)],
+			["pressed", C_GOOD.darkened(0.18)]]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = spec[1]
+		sb.set_corner_radius_all(10)
+		sb.set_content_margin_all(10)
+		b.add_theme_stylebox_override(str(spec[0]), sb)
+
+	var focus := StyleBoxFlat.new()
+	focus.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+	focus.set_corner_radius_all(10)
+	focus.set_content_margin_all(10)
+	focus.border_color = C_TEXT
+	focus.set_border_width_all(2)
+	b.add_theme_stylebox_override("focus", focus)
+
+	for key: String in ["font_color", "font_hover_color", "font_pressed_color",
+			"font_focus_color"]:
+		b.add_theme_color_override(key, C_BG)
+	return b
+
+
 # --------------------------------------------------------------------- layout
 
 func _relayout() -> void:
@@ -458,7 +502,7 @@ func _build_setup() -> Control:
 			_pref_increment = int(spec[2]))
 		times.add_child(b)
 
-	var start := _make_button("Start", _start_game)
+	var start := _make_primary_button("Start", _start_game)
 	start.custom_minimum_size = Vector2(0, 48)
 	start.add_theme_font_size_override("font_size", 20)
 	box.add_child(start)
