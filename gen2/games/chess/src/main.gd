@@ -14,6 +14,14 @@ const B := preload("res://src/board.gd")
 const G := preload("res://src/game.gd")
 const O := preload("res://src/opponent.gd")
 
+## "Gentle" — index 5 since "Child" was inserted at the bottom of the ladder.
+const DEFAULT_LEVEL: int = 5
+
+## Bumped whenever an insertion renumbers ChessOpponent.LEVELS, so a remembered
+## `chess/level` can be moved with it. Scale 1 is the original eight levels;
+## scale 2 added "Child" below them, shifting every stored number up by one.
+const LEVEL_SCALE: int = 2
+
 const C_BG: Color = Color(0.0980, 0.1373, 0.2353)
 const C_PANEL: Color = Color(0.1451, 0.1922, 0.3059)
 const C_PANEL_LINE: Color = Color(0.2353, 0.3059, 0.4706)
@@ -73,7 +81,7 @@ var _promo_from: int = -1
 var _promo_to: int = -1
 
 var _pref_side: int = 1          ## +1 white, -1 black, 0 random
-var _pref_level: int = 4
+var _pref_level: int = DEFAULT_LEVEL
 var _pref_base: int = 600
 var _pref_increment: int = 0
 var _thinking_dots: float = 0.0
@@ -186,7 +194,14 @@ func quit_game() -> void:
 
 func _load_prefs() -> void:
 	_pref_side = int(QConfig.get_value("chess/side", 1))
-	_pref_level = clampi(int(QConfig.get_value("chess/level", 4)), 1, O.LEVELS.size())
+	# A stored level is a POSITION in the ladder, not a strength, so inserting a
+	# level below it silently makes the machine one notch easier. Move it once and
+	# record that it was moved; 0 means nothing was ever stored, which is the only
+	# case that should land on the default.
+	var stored_level: int = int(QConfig.get_value("chess/level", 0))
+	if stored_level > 0 and int(QConfig.get_value("chess/level_scale", 1)) < LEVEL_SCALE:
+		stored_level += 1
+	_pref_level = clampi(stored_level if stored_level > 0 else DEFAULT_LEVEL, 1, O.LEVELS.size())
 	_pref_base = int(QConfig.get_value("chess/base_seconds", 600))
 	_pref_increment = int(QConfig.get_value("chess/increment_seconds", 0))
 	_pref_sound = bool(QConfig.get_value("chess/sound", true))
@@ -197,6 +212,7 @@ func _save_prefs() -> void:
 	## password never ends up in user://config.cfg. See QConfig.
 	QConfig.set_value("chess/side", _pref_side)
 	QConfig.set_value("chess/level", _pref_level)
+	QConfig.set_value("chess/level_scale", LEVEL_SCALE)
 	QConfig.set_value("chess/base_seconds", _pref_base)
 	QConfig.set_value("chess/increment_seconds", _pref_increment)
 	QConfig.set_value("chess/sound", _pref_sound)
@@ -409,9 +425,11 @@ func _build_setup() -> Control:
 	var levels := HFlowContainer.new()
 	levels.add_theme_constant_override("h_separation", 5)
 	levels.add_theme_constant_override("v_separation", 5)
-	# Four to a row, deliberately: eight in a line makes the card too wide to
-	# sit beside the other two groups, which is what buys the height back.
-	levels.custom_minimum_size = Vector2(4 * 42 + 3 * 5, 0)
+	# Three to a row, deliberately: nine in a line makes the card too wide to
+	# sit beside the other two groups, which is what buys the height back. Three
+	# rather than the old four because nine buttons divide evenly by it — four
+	# leaves a single orphan on a third row.
+	levels.custom_minimum_size = Vector2(3 * 42 + 2 * 5, 0)
 	g_level.add_child(levels)
 	var level_group := ButtonGroup.new()
 	for i in O.LEVELS.size():

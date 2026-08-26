@@ -18,7 +18,7 @@ const B := preload("res://src/board.gd")
 const S := preload("res://src/search.gd")
 const U := preload("res://src/uci.gd")
 
-## Eight levels. `noise` is the width, in centipawns, of a uniform random bonus
+## Nine levels. `noise` is the width, in centipawns, of a uniform random bonus
 ## added to each ROOT move's score before the best is chosen — the search is
 ## never crippled, it is only overruled. That matters: a weak level made by
 ## searching one ply produces moves that are stupid in a boring, uniform way,
@@ -28,7 +28,35 @@ const U := preload("res://src/uci.gd")
 ##
 ## `min_think_ms` is a floor on how long a move takes to arrive. An opponent
 ## that answers instantly does not read as an opponent.
+##
+## `native_only` keeps a level away from an external UCI engine. Stockfish's
+## weakest setting — Skill Level 0, and UCI_Elo's floor of 1320 — is an order of
+## magnitude stronger than level 1 is meant to be, so that level always plays
+## the native search even on a machine that has an engine configured.
+##
+## `uniform` picks a root move at random instead of the noisy-best one, and is
+## what level 1, "Child", is built on. Widening `noise` was tried first and does
+## not work: past about 500 cp the window already spans the whole depth-1 score
+## spread, so every larger number produces the same near-random player. MEASURED
+## — Child at noise 1500 scored 46% over 14 games against Beginner at noise 320,
+## i.e. no weaker at all. Uniform selection is a different mechanism rather than
+## a bigger number, and is the actual floor: there is nothing below "any legal
+## move".
+##
+## Two things are deliberately NOT loosened even there. A decisive score still
+## overrides the dice (see NOISE_IMMUNE_CP), so the level takes a mate, dodges
+## one, and snaps off a hanging queen — without that a game against a child
+## never ends, which reads as broken rather than as weak. And the root list is
+## still scored in FULL, hence a budget larger than Beginner's despite being the
+## weaker level: an abort truncates `scored`, and drawing uniformly from a
+## truncated list draws from the best-ordered moves, which is accidentally
+## stronger and erratically so.
+##
+## "ELO 100" is the intent, not a measurement — nothing here has been rated
+## against a pool. What is measured is relative: see tests/run.gd, and the
+## match numbers in PROJECT_STATE.md.
 const LEVELS: Array[Dictionary] = [
+	{"name": "Child", "depth": 1, "budget_ms": 80, "noise": 1500, "skill": 0, "min_think_ms": 500, "native_only": true, "uniform": true},
 	{"name": "Beginner", "depth": 1, "budget_ms": 60, "noise": 320, "skill": 0, "min_think_ms": 450},
 	{"name": "Very easy", "depth": 2, "budget_ms": 120, "noise": 210, "skill": 2, "min_think_ms": 450},
 	{"name": "Easy", "depth": 3, "budget_ms": 220, "noise": 130, "skill": 4, "min_think_ms": 450},
@@ -45,7 +73,7 @@ const LEVELS: Array[Dictionary] = [
 ## mate it had already found, so the game refuses to end.
 const NOISE_IMMUNE_CP: int = 900
 
-var level: int = 4                    ## 1..8
+var level: int = 5                    ## 1..9
 var external_enabled: bool = false
 var external_name: String = ""
 
@@ -61,7 +89,7 @@ var _done: bool = false
 var _thinking: bool = false
 var _ready_at_ms: int = 0
 ## Owned RNG, never the global one. A seeded opponent is reproducible, which is
-## what lets a test assert that level 1 and level 8 differ without the assertion
+## what lets a test assert that level 1 and level 9 differ without the assertion
 ## depending on whatever else in the process last called randi().
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var _uci: ChessUci = null
@@ -149,7 +177,7 @@ func _worker(fen: String, avoid_keys: Dictionary, cfg: Dictionary) -> void:
 	var t0: int = Time.get_ticks_msec()
 	var board: ChessBoard = B.new(fen)
 	var move: int = 0
-	if _uci != null and _uci.is_open():
+	if _uci != null and _uci.is_open() and not bool(cfg.get("native_only", false)):
 		_uci.set_skill(int(cfg["skill"]))
 		var uci_move: String = _uci.best_move(fen, int(cfg["depth"]), int(cfg["budget_ms"]))
 		move = board.move_from_uci(uci_move)
@@ -159,7 +187,7 @@ func _worker(fen: String, avoid_keys: Dictionary, cfg: Dictionary) -> void:
 		last_depth = int(r["depth"])
 		last_score = int(r["score"])
 		last_nodes = int(r["nodes"])
-		move = choose(r["scored"], int(cfg["noise"]))
+		move = choose(r["scored"], int(cfg["noise"]), bool(cfg.get("uniform", false)))
 	last_ms = Time.get_ticks_msec() - t0
 	_mutex.lock()
 	_result = move
@@ -167,7 +195,7 @@ func _worker(fen: String, avoid_keys: Dictionary, cfg: Dictionary) -> void:
 	_mutex.unlock()
 
 
-func choose(scored: Array, noise: int) -> int:
+func choose(scored: Array, noise: int, uniform: bool = false) -> int:
 	## Pick a root move given every move's searched score. Public and pure so a
 	## test can drive it with a fixed list instead of a real search.
 	if scored.is_empty():
@@ -177,6 +205,9 @@ func choose(scored: Array, noise: int) -> int:
 		best_real = maxi(best_real, int(entry[1]))
 	# Anything decisive is exempt from noise, in both directions.
 	var decisive: bool = absi(best_real) >= NOISE_IMMUNE_CP
+	# ...and exempt from the dice too, or the weakest level cannot end a game.
+	if uniform and not decisive:
+		return int(scored[_rng.randi_range(0, scored.size() - 1)][0])
 	var best_move: int = int(scored[0][0])
 	var best_value: int = -(1 << 30)
 	for entry: Array in scored:

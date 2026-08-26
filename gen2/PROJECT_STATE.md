@@ -447,7 +447,7 @@ across frames means the board stops answering a child's finger while the
 machine thinks.
 
 **Difficulty is noise on the root scores, not a shallower search.** Each of the
-eight levels caps depth and time, and then adds a uniform random bonus of up to
+nine levels caps depth and time, and then adds a uniform random bonus of up to
 `noise` centipawns to every root move before the best is taken. A level made
 weak by searching one ply plays moves that are stupid in a boring, uniform way;
 a full search plus noise develops sensibly and then hangs a piece, which is
@@ -455,6 +455,32 @@ what a human beginner does and what a child can learn to punish. Anything
 decisive — a mate found or a mate to be avoided, ±900 cp or more — is exempt,
 because a level that walks into mate at random reads as broken rather than
 weak, and one that MISSES a mate it has already found refuses to end the game.
+
+**Level 1 "Child" is the exception, and is uniform selection rather than
+noise** (added 2026-08-25). The obvious implementation — level 1 with a very
+wide `noise` — was built first and MEASURED not to work: at noise 1500 against
+Beginner's 320 it scored 46% over 14 games, i.e. no weaker at all. The reason
+is saturation. Both sit at depth 1, and past roughly 500 cp the window already
+spans the entire depth-1 score spread, so every larger number yields the same
+near-random player. `uniform: true` draws the root move from a flat
+distribution instead, which is a different mechanism rather than a bigger
+number and is the actual floor — there is nothing below "any legal move".
+
+Two guarantees are kept at that level anyway. The ±900 cp exemption still
+applies, so Child takes a mate, dodges one, and snaps off a hanging queen; a
+game a child cannot finish reads as broken, not as weak. And its time budget is
+LARGER than Beginner's (80 ms against 60) despite being weaker, because an
+aborted search truncates `scored`, and drawing uniformly from a truncated list
+draws only from the best-ordered moves — accidentally stronger, and erratically
+so. `native_only: true` also keeps it off any external UCI engine: Stockfish's
+floor is Skill Level 0 / UCI_Elo 1320, an order of magnitude too strong.
+
+Inserting a level at the BOTTOM renumbers every stored preference, so
+`chess/level` is migrated once against `chess/level_scale` in `src/main.gd` —
+scale 1 is the original eight, scale 2 adds Child and shifts every remembered
+number up by one. Without it, everyone's saved difficulty silently drops a
+notch. The setup grid is 3x3 now rather than 4-to-a-row, because nine divides
+by three and four leaves an orphan on a third row.
 
 **The pieces are drawn in code.** Godot's default font carries none of the
 chess glyphs — VERIFIED, `Font.has_char()` is false across the whole
@@ -1566,9 +1592,45 @@ without a display; there is no need to guess at them.
   the read loop is bounded, but the bound has never been hit.
 - **Chess strength is estimated, not measured.** "Roughly club strength" comes
   from depth and node rate, not from a match against rated opposition. Nobody
-  has played the eight levels against anything that could put a number on them,
+  has played the nine levels against anything that could put a number on them,
   and the noise values that separate them were chosen by argument. If they turn
-  out wrong the fix is one table in `src/opponent.gd`.
+  out wrong the fix is one table in `src/opponent.gd`. The only numbers that do
+  exist are relative, from level-vs-level self-play on 2026-08-25 (colours
+  alternating, native search, no book): Child scored **38%** over 16 games
+  against Beginner, and **42%** over 6 games against Gentle. Both samples are
+  far too small to separate anything — ±25% at n=16 — and the second is
+  suspiciously high for a random mover against a depth-4 search, which is what
+  turned up the bug below.
+
+- **BUG, pre-existing and significant: root scores handed to the level system
+  are alpha bounds, not values** (found 2026-08-25, NOT introduced by the Child
+  work, NOT fixed). `ChessSearch.search()` searches each root move with
+  `-_negamax(depth - 1, -INF, -alpha, 1)`. Every move that fails to improve on
+  the running best fails high in the child and comes back at approximately
+  `alpha` — so `scored` records one value for all of them, and its own docstring
+  ("every root move with its value") is wrong. MEASURED on a quiet middlegame,
+  `r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4`:
+
+      depth 1: 33 root moves, 1 distinct score
+      depth 2: 33 root moves, 1 distinct score
+      depth 4: 33 root moves, 1 distinct score
+      depth 6: 33 root moves, 2 distinct scores (31 of 33 tied)
+
+  The consequence is that `ChessOpponent.choose()` is adding noise to a FLAT
+  list, so every level with `noise > 0` — that is, 2 through 8 — picks close to
+  uniformly at random in any position without a decisive move, whatever its
+  noise setting. That is why the levels do not separate, and it means the ladder
+  is far weaker and far flatter than the table in `src/opponent.gd` describes.
+  Level 9 is unaffected (`noise` 0 takes the first entry, which `_order_root`
+  has already put the true best move at) and so is level 1 (`uniform` draws
+  deliberately rather than accidentally).
+
+  The fix is to search root moves on a full window — `-_negamax(depth - 1,
+  -INF, INF, 1)` — so every root value is exact. That costs the root's
+  alpha-beta cutoffs, which is a real slowdown on the Pi at levels 8 and 9, and
+  it will change the strength of every level. Both are judgement calls about the
+  product rather than about the code, so it is written down here rather than
+  fixed in passing.
 - **Chess has no opening book.** At the top levels it plays the same first few
   moves every game, because a deterministic search from a fixed position is
   deterministic. The lower levels vary because of the noise; the higher ones do

@@ -454,7 +454,8 @@ func _test_opponent_levels() -> void:
 			always_best = false
 	_check("a decisive score is never overruled by noise", always_best)
 
-	_eq("there are eight levels", O.LEVELS.size(), 8)
+	_eq("there are nine levels", O.LEVELS.size(), 9)
+	_eq("the bottom of the ladder is the child level", str(O.LEVELS[0]["name"]), "Child")
 	var ascending: bool = true
 	for i in range(1, O.LEVELS.size()):
 		if int(O.LEVELS[i]["depth"]) < int(O.LEVELS[i - 1]["depth"]):
@@ -462,6 +463,54 @@ func _test_opponent_levels() -> void:
 		if int(O.LEVELS[i]["noise"]) > int(O.LEVELS[i - 1]["noise"]):
 			ascending = false
 	_check("levels get deeper and quieter as they go up", ascending)
+
+	# The child level is uniform selection, not a wider noise window. Widening
+	# noise saturates — see the header of src/opponent.gd — so the flag is the
+	# thing that has to be present, and it has to be the only one that has it.
+	var child: Dictionary = O.LEVELS[0]
+	_check("the child level draws its move uniformly", bool(child.get("uniform", false)))
+	_check("...and never reaches for an external engine, which cannot go that low",
+			bool(child.get("native_only", false)))
+	_check("...and is given time to score every root move, unlike a truncating budget",
+			int(child["budget_ms"]) >= int(O.LEVELS[1]["budget_ms"]))
+	var uniform_count: int = 0
+	var native_only_count: int = 0
+	for lv: Dictionary in O.LEVELS:
+		if bool(lv.get("uniform", false)):
+			uniform_count += 1
+		if bool(lv.get("native_only", false)):
+			native_only_count += 1
+	_eq("no other level throws the dice like that", uniform_count, 1)
+	_eq("no other level refuses the external engine", native_only_count, 1)
+
+	# Dumbness has to be demonstrated, not asserted. A hung queen is -900 against
+	# a best of 0, so it is NOT decisive and the dice are allowed to reach it;
+	# beginner's 320 cannot span that gap no matter what it rolls.
+	var hang: Array = [[101, 0], [202, -900]]
+	var child_hung: int = 0
+	var beginner_hung: int = 0
+	for i in 400:
+		if o.choose(hang, int(child["noise"]), true) == 202:
+			child_hung += 1
+		if o.choose(hang, int(O.LEVELS[1]["noise"])) == 202:
+			beginner_hung += 1
+	_check("the child level hangs a queen it can see", child_hung > 0)
+	_eq("...where beginner's noise is too narrow to ever reach one", beginner_hung, 0)
+
+	# Uniform means uniform: every legal move has to come up, not just the worst.
+	var spread: Array = [[101, 50], [202, 10], [303, -20], [404, -60]]
+	var picked: Dictionary = {}
+	for i in 400:
+		picked[o.choose(spread, 0, true)] = true
+	_eq("uniform selection reaches every root move", picked.size(), 4)
+
+	# ...but it still has to be able to end a game. The dice never override a
+	# mate, in either direction, or a child plays forever.
+	var child_always_best: bool = true
+	for i in 400:
+		if o.choose(decisive, int(child["noise"]), true) != 101:
+			child_always_best = false
+	_check("the child level still takes a mate when it is there", child_always_best)
 
 	var seeded_a := O.new(999)
 	var seeded_b := O.new(999)
@@ -541,7 +590,7 @@ func _test_game_flow() -> void:
 
 func _test_telemetry_payload() -> void:
 	var g := G.new()
-	g.start(B.BLACK, 600, 5, 6, "Tough")
+	g.start(B.BLACK, 600, 5, 7, "Tough")
 	g.apply(g.board.move_from_san("e4"))
 	g.apply(g.board.move_from_san("e5"))
 	g.apply(g.board.move_from_san("Nf3"))
@@ -551,7 +600,7 @@ func _test_telemetry_payload() -> void:
 		extra[str(pair[0])] = pair[1]
 	_eq("moves counts full moves, not plies", int(extra["moves"]), 2)
 	_eq("plies are reported too", int(extra["plies"]), 3)
-	_eq("the level rides along", int(extra["level"]), 6)
+	_eq("the level rides along", int(extra["level"]), 7)
 	_eq("...by name as well", str(extra["level_name"]), "Tough")
 	_eq("which colour was played is recorded", str(extra["played_as"]), "black")
 	_eq("the time control is in PGN's own notation", str(extra["time_control"]), "600+5")
