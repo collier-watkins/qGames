@@ -124,6 +124,41 @@ static func stroke_round_rect(ci: CanvasItem, rect: Rect2, radius: float,
 	ci.draw_style_box(_stroke_box, rect)
 
 
+## The breathing clock, shared by the question cell and the progress strip.
+##
+## Both breathe in step, and with on-demand rendering (QGameRoot) every redraw
+## is a whole frame — so they must repaint on the SAME loop iteration. Two
+## private accumulators drifted apart (each stops while its own animation is
+## not showing), which turned 20 frames a second into up to 40. The tick is a
+## function of the wall clock, latched once per process frame so both strips
+## read the identical value.
+static var _pulse_frame: int = -1
+static var _pulse_tick: int = 0
+
+
+static func pulse_tick() -> int:
+	var f: int = Engine.get_process_frames()
+	if f != _pulse_frame:
+		_pulse_frame = f
+		_pulse_tick = int(float(Time.get_ticks_msec()) * PULSE_HZ / 1000.0)
+	return _pulse_tick
+
+
+## Seconds, wrapped at TAU. Drawing uses sin(2 * phase), which is continuous
+## across the wrap.
+static func pulse_phase(tick: int) -> float:
+	return fmod(float(tick) / PULSE_HZ, TAU)
+
+
+## A breath nobody is looking at costs a full frame per tick. Behind another
+## window it holds still, and picks up again on focus.
+static func pause_pulse_in_background(c: Control, what: int) -> void:
+	if what == Node.NOTIFICATION_APPLICATION_FOCUS_OUT:
+		c.set_process(false)
+	elif what == Node.NOTIFICATION_APPLICATION_FOCUS_IN:
+		c.set_process(true)
+
+
 ## The visible run plus a trailing "?" cell. Pure drawing; no interaction.
 class SequenceStrip:
 	extends Control
@@ -136,7 +171,7 @@ class SequenceStrip:
 	var reveal_t: float = 1.0       ## the answer dropping into the ? cell
 
 	var _pulse: float = 0.0
-	var _redraw_accum: float = 0.0
+	var _tick: int = -1
 
 	## The ? cell breathes so the eye goes there first. Slow and shallow —
 	## anything faster reads as urgency, which is the opposite of the mood.
@@ -144,15 +179,19 @@ class SequenceStrip:
 	## Redrawn at PULSE_HZ, not every frame. A 0.5 Hz breath does not need 60
 	## redraws a second, and this whole row repaints on every one of them —
 	## measured on this box, redrawing it per-frame doubled process CPU for an
-	## animation nobody can see moving faster.
-	func _process(delta: float) -> void:
+	## animation nobody can see moving faster. With on-demand rendering a
+	## redraw IS a frame, so this rate is the game's idle GPU cost.
+	func _process(_delta: float) -> void:
 		if not reveal.is_empty():
 			return
-		_pulse = fmod(_pulse + delta, TAU)
-		_redraw_accum += delta
-		if _redraw_accum >= 1.0 / SequenceView.PULSE_HZ:
-			_redraw_accum = 0.0
+		var t: int = SequenceView.pulse_tick()
+		if t != _tick:
+			_tick = t
+			_pulse = SequenceView.pulse_phase(t)
 			queue_redraw()
+
+	func _notification(what: int) -> void:
+		SequenceView.pause_pulse_in_background(self, what)
 
 	## The answer landing in the ? cell. Ties the button that was pressed to
 	## the place the sequence was leading, which is the thing being taught.
@@ -420,18 +459,21 @@ class ProgressStrip:
 	var finished: bool = false
 
 	var _pulse: float = 0.0
-	var _redraw_accum: float = 0.0
+	var _tick: int = -1
 	var _landing: int = -1       ## index of the segment currently animating in
 	var _land_t: float = 1.0
 
-	func _process(delta: float) -> void:
+	func _process(_delta: float) -> void:
 		if finished:
 			return
-		_pulse = fmod(_pulse + delta, TAU)
-		_redraw_accum += delta
-		if _redraw_accum >= 1.0 / SequenceView.PULSE_HZ:
-			_redraw_accum = 0.0
+		var t: int = SequenceView.pulse_tick()
+		if t != _tick:
+			_tick = t
+			_pulse = SequenceView.pulse_phase(t)
 			queue_redraw()
+
+	func _notification(what: int) -> void:
+		SequenceView.pause_pulse_in_background(self, what)
 
 	## Call after appending a result: the new segment drops in at double size
 	## so the player sees where their answer went.

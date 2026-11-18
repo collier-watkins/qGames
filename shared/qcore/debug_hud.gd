@@ -388,6 +388,10 @@ func _compact() -> String:
 	parts.append(_c(_build_label(), COL_DIM))
 	parts.append(_c("%.0f fps" % stats.fps, _lvl_col(stats.fps_level(TARGET_FPS))))
 	parts.append("%.1fms" % stats.frame_ms)
+	# On-demand rendering: "fps" above is loop iterations; this is frames drawn
+	# (this HUD's own refresh included).
+	if OS.is_in_low_processor_usage_mode() and stats.drawn_fps >= 0.0:
+		parts.append(_c("drawn %.0f/s" % stats.drawn_fps, COL_DIM))
 	if stats.cpu_pct >= 0.0:
 		parts.append(_c("cpu %.0f%%" % stats.cpu_pct, _lvl_col(stats.cpu_level())))
 	if stats.rss_mb >= 0.0:

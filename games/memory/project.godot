@@ -14,6 +14,15 @@ config/name="Memory Match"
 run/main_scene="res://src/main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
+; Draw a frame only when something on screen changed. Without this every game
+; rendered 60 full frames a second while sitting still — on the Pi 4 one idle
+; game held the V3D render queue ~80% busy and ~50% of a core. Anything that
+; animates (tweens, queue_redraw, timers) still runs at full rate. Set here so
+; it holds from the first frame; QGameRoot re-applies it from QConfig
+; render/on_demand (QGAMES_RENDER_ON_DEMAND=false for framerate benchmarks) and
+; caps the loop while the window is unfocused. MEASURED — PROJECT_STATE.md,
+; "Idle and background rendering (2026-11-18)".
+run/low_processor_mode=true
 
 ; Boot splash. Replaces Godot's own logo, on its default #242424 grey, with this
 ; game's icon on this game's own background colour, so the splash and the first
@@ -126,3 +135,12 @@ environment/defaults/default_clear_color=Color(0.098, 0.1373, 0.2353, 1)
 ; Costs, honestly: +18 MB RSS, and a desktop with no Vulkan driver is untested.
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="gl_compatibility"
+
+[audio]
+
+; This game makes no sound. The default (PulseAudio) driver still opens a stream
+; and mixes silence for ever on its own thread — MEASURED on the Pi 4 at ~8% of
+; a core per idle game, plus the matching load in pipewire-pulse. Dummy has no
+; stream. If this game ever gets sound, delete this. Chess has sound and keeps
+; the default. See PROJECT_STATE.md, "Idle and background rendering".
+driver/driver="Dummy"

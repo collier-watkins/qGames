@@ -7,6 +7,7 @@ extends SceneTree
 const MemoryBoard := preload("res://src/board.gd")
 const QMqttClientT := preload("res://addons/qcore/mqtt_client.gd")
 const QConfigT := preload("res://addons/qcore/config.gd")
+const QPowerPolicyT := preload("res://addons/qcore/power_policy.gd")
 
 var _pass: int = 0
 var _fail: int = 0
@@ -35,6 +36,9 @@ func _initialize() -> void:
 	_test_config_layering()
 	_test_config_defaults()
 	_test_config_writes_only_what_it_was_given()
+
+	_test_power_policy()
+	_test_drawn_fps()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -466,3 +470,38 @@ func _test_config_writes_only_what_it_was_given() -> void:
 			not cfg._written.has("mqtt/password"))
 	cfg.free()
 
+
+
+# ── qcore: idle and background rendering (shared/qcore/power_policy.gd) ─────
+
+
+func _test_power_policy() -> void:
+	var p: Dictionary = QPowerPolicyT.decide(true, true, 10, 0)
+	_check_eq("focused: on-demand rendering", p["low_processor"], true)
+	_check_eq("focused: no loop cap (vsync paces it)", p["max_fps"], 0)
+	p = QPowerPolicyT.decide(true, false, 10, 0)
+	_check_eq("unfocused: capped at background_fps", p["max_fps"], 10)
+	_check_eq("unfocused: still on-demand", p["low_processor"], true)
+	p = QPowerPolicyT.decide(true, false, 0, 0)
+	_check_eq("background_fps 0 disables the cap", p["max_fps"], 0)
+	p = QPowerPolicyT.decide(false, true, 10, 0)
+	_check_eq("render/on_demand=false is continuous rendering", p["low_processor"], false)
+	p = QPowerPolicyT.decide(true, true, 10, 30)
+	_check_eq("focused restores the project's own max_fps", p["max_fps"], 30)
+	p = QPowerPolicyT.decide(true, false, 10, 5)
+	_check_eq("a project cap lower than the background cap wins", p["max_fps"], 5)
+	p = QPowerPolicyT.decide(true, false, 10, 60)
+	_check_eq("the background cap wins over a higher project cap", p["max_fps"], 10)
+	_check_eq("config default matches the policy default",
+			QConfigT.DEFAULTS["render/background_fps"], QPowerPolicyT.BACKGROUND_FPS)
+	_check_eq("on-demand rendering is the default", QConfigT.DEFAULTS["render/on_demand"], true)
+
+
+func _test_drawn_fps() -> void:
+	var st := QDebugStats.new()
+	st._update_drawn(10.0, 100)
+	_check_eq("drawn_fps needs two samples", st.drawn_fps, -1.0)
+	st._update_drawn(12.0, 100)
+	_check_eq("an idle on-demand game draws nothing", st.drawn_fps, 0.0)
+	st._update_drawn(13.0, 160)
+	_check_eq("frames drawn over wall time", st.drawn_fps, 60.0)

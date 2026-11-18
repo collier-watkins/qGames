@@ -49,6 +49,12 @@ const DEFAULTS := {
 	"debug/hud_start": "compact",        # "off" | "compact" | "full"
 	"debug/hud_hz": 4.0,                 # sample rate; drawing cost, not accuracy
 	"debug/hud_stdout": false,           # also print one line/sec — headless, CI, ssh
+	# Idle and background rendering (QGameRoot, QPowerPolicy). on_demand draws a
+	# frame only when something changed; false is continuous 60 Hz rendering, for
+	# framerate benchmarks only. background_fps caps the main loop while the
+	# game is unfocused; 0 disables the cap.
+	"render/on_demand": true,
+	"render/background_fps": 10,
 	# Per-app appearance. Games ignore it; the notes editor reads it.
 	"ui/theme": "light",
 	# How big everything is drawn, independent of window size. Every game

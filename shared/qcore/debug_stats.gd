@@ -50,6 +50,10 @@ var nodes: int = 0
 var resources: int = 0
 var orphans: int = 0
 var cores: int = 1
+## Frames actually rendered per second. Differs from `fps` under on-demand
+## rendering (QGameRoot), where TIME_FPS counts main-loop iterations and an
+## idle game draws nothing at all. -1 until two samples exist.
+var drawn_fps: float = -1.0
 
 # ── since last reset ─────────────────────────────────────────────────────────
 var worst_frame_ms: float = 0.0
@@ -67,6 +71,8 @@ var _warm_frames: int = 0
 var _last_cpu_sec: float = -1.0
 var _last_cpu_wall: float = -1.0
 var _have_baseline: bool = false
+var _last_drawn: int = -1
+var _last_drawn_sec: float = 0.0
 
 
 func _init() -> void:
@@ -112,6 +118,7 @@ func sample(now_sec: float) -> void:
 
 	rss_mb = read_rss_mb()
 	_update_cpu(now_sec)
+	_update_drawn(now_sec, Engine.get_frames_drawn())
 
 	if not _have_baseline:
 		reset(now_sec)
@@ -119,6 +126,13 @@ func sample(now_sec: float) -> void:
 
 	if rss_mb >= 0.0:
 		push_mem_sample(now_sec, rss_mb)
+
+
+func _update_drawn(now_sec: float, drawn: int) -> void:
+	if _last_drawn >= 0 and now_sec > _last_drawn_sec:
+		drawn_fps = float(drawn - _last_drawn) / (now_sec - _last_drawn_sec)
+	_last_drawn = drawn
+	_last_drawn_sec = now_sec
 
 
 ## Re-baseline the deltas and peaks. Bound to a key in the HUD so you can zero

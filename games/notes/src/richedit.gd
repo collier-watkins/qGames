@@ -915,6 +915,24 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 
+## A blinking caret in a window you are not typing into is two full frames a
+## second for nothing (on-demand rendering: every flip IS a frame). Like any
+## desktop editor, an inactive window shows no caret; it comes back, solid, on
+## focus.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		if is_processing():
+			set_process(false)
+			_blink_on = false
+			queue_redraw()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		if has_focus() and not is_processing():
+			_blink_t = 0.0
+			_blink_on = true
+			set_process(true)
+			queue_redraw()
+
+
 func _on_focus_entered() -> void:
 	_blink_t = 0.0
 	_blink_on = true

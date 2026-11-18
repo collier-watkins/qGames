@@ -53,6 +53,7 @@ func _ready() -> void:
 	# Scale BEFORE the first sync, so a game lays out against the size it will
 	# actually have rather than laying out twice and flashing.
 	_load_ui_scale()
+	_apply_loop_policy()
 	_sync_to_viewport()
 	get_viewport().size_changed.connect(_sync_to_viewport)
 	_build_scale_toast()
@@ -202,6 +203,47 @@ func _game_ready() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST or what == NOTIFICATION_WM_CLOSE_REQUEST:
 		quit_game()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_app_focused = false
+		_apply_loop_policy()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_app_focused = true
+		_apply_loop_policy()
+
+
+## Idle and background rendering — see QPowerPolicy and PROJECT_STATE.md.
+##
+## Every game used to render 60 full frames a second for ever, focused or not,
+## visible or not: on the Pi 4 one idle game kept the V3D render queue ~80% busy
+## and ~50% of a core. Two things stop that, both here so every game inherits
+## them and none has to know:
+##
+##   - on-demand rendering (OS.low_processor_usage_mode): a frame is drawn only
+##     when something on screen changed. Tweens, queue_redraw() and property
+##     changes all count, so anything that animates still animates at full rate.
+##   - a loop cap while the APPLICATION is unfocused, restored on focus in.
+##     Godot propagates the focus notifications to every node, so this needs no
+##     wiring. Under Xwayland a covered window is indistinguishable from a
+##     visible one, so focus is the only background signal there is.
+##
+## Starts as focused rather than asking the window: a game must never come up
+## throttled on a missed FOCUS_IN. A game launched behind another stays at full
+## loop rate until its first focus change — idle, it still draws nothing.
+##
+## render/on_demand=false (QGAMES_RENDER_ON_DEMAND=false) restores continuous
+## rendering, which is what a framerate benchmark needs — with on-demand on, the
+## engine's FPS monitor counts loop iterations, not frames drawn.
+var _app_focused: bool = true
+
+
+func _apply_loop_policy() -> void:
+	var p: Dictionary = QPowerPolicy.decide(
+			bool(QConfig.get_value("render/on_demand", true)),
+			_app_focused,
+			int(QConfig.get_value("render/background_fps", QPowerPolicy.BACKGROUND_FPS)),
+			int(ProjectSettings.get_setting("application/run/max_fps", 0)))
+	OS.low_processor_usage_mode = bool(p["low_processor"])
+	Engine.max_fps = int(p["max_fps"])
 
 
 func _unhandled_input(event: InputEvent) -> void:
