@@ -19,7 +19,7 @@ GAMES_LIST  = $(if $(GAMES),$(GAMES),(none found under games/*/project.godot))
 
 .DEFAULT_GOAL := help
 
-.PHONY: help _check-game import run test test-all export-linux export-arm64 export-all \
+.PHONY: help _check-game import run test test-all selftest export-linux export-arm64 export-all \
         dist dist-tar deploy install uninstall bake bake-clean version release new-game \
         chess-pieces chess-pieces-repo clean
 
@@ -29,9 +29,12 @@ help:
 >@echo "  make run           GAME=<name>               run one game"
 >@echo "  make test          GAME=<name>               headless tests for one game"
 >@echo "  make test-all                                headless tests for every game"
+>@echo "  make selftest      GAME=<name>                can this machine reach the broker?"
 >@echo "  make export-linux  GAME=<name>                export 'Linux x86_64' into dist/"
 >@echo "  make export-arm64  GAME=<name>                export 'Linux arm64' into dist/"
 >@echo "  make export-all                               export both arches, every game"
+>@echo "  make install                                 build every arch, install here"
+>@echo "  make deploy        [GAME=<name>] [PI=<host>]  build for the games Pi and install it there"
 >@echo "  make new-game      NAME=<name> [TITLE=\"Display Name\"]     scaffold a new game"
 >@echo "  make chess-pieces                            dump chess's pieces as editable SVGs"
 >@echo "  make chess-pieces-repo                       ...into the repo, tracked and shipped"
@@ -66,6 +69,15 @@ test: _check-game
 
 test-all:
 >@games="$(GAMES)"; if [ -z "$$games" ]; then echo "no games found under games/*/project.godot"; exit 0; fi; status=0; for g in $$games; do echo "== test: $$g =="; if [ ! -d "games/$$g/.godot" ]; then echo "-- first run: importing $$g"; $(GODOT) --headless --path "games/$$g" --import >/dev/null 2>&1 || true; fi; $(GODOT) --headless --path "games/$$g" --script res://tests/run.gd || status=1; done; exit $$status
+
+# Ask a machine whether its telemetry can actually reach the broker. Publishes
+# one message to qGames/_selftest/<game>, prints the client's counters, exits
+# nonzero if nothing left the machine. Works from source; the shipped binary
+# understands the same flag:
+#     ~/.local/share/qgames/memory/memory --headless -- --telemetry-selftest
+selftest: _check-game
+>@$(call ensure_import,$(GAME))
+>$(GODOT) --headless --path games/$(GAME) -- --telemetry-selftest
 
 export-linux: _check-game
 >@mkdir -p "dist/$(GAME)"
@@ -119,9 +131,19 @@ dist-tar: dist
 >@echo "qgames-$(VERSION).tar.gz"
 
 # Build for the target's actual architecture, copy it there, install it.
-#   make deploy PI=pi@raspberrypi.local
+#
+#   make deploy                     the games Pi, 10.118.25.17 (the default)
+#   make deploy GAME=paint          just one game
+#   make deploy PI=q@other-host     somewhere else
+#
+# PI defaults to the games Pi because that is the only target there has ever
+# been, and a required argument you always answer the same way is a step that
+# only exists to be forgotten. `qpi` is an ssh alias for q@10.118.25.17; the
+# raw address works too, and is spelled out here so this still reads without
+# the alias.
+PI ?= qpi
 deploy:
->@test -n "$(PI)" || { echo "error: PI is required, e.g. make deploy PI=pi@raspberrypi.local" >&2; exit 1; }
+>@test -n "$(PI)" || { echo "error: PI is empty, e.g. make deploy PI=q@10.118.25.17" >&2; exit 1; }
 >@tools/deploy.sh "$(PI)" $(GAME)
 
 install: dist

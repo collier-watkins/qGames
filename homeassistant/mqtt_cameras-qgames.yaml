@@ -1,0 +1,15 @@
+# qGames — the painting itself.
+#
+# A camera, not a sensor: a sensor state is capped at 255 characters and cannot
+# carry binary at all. The topic is RETAINED and published at full size before
+# paint's scalars, so a dashboard that restarts an hour later still has the
+# picture. Downscaling was measured LARGER on the wire — blurring flat colour
+# into gradients is exactly what stops PNG compressing.
+- name: "Latest Image"
+  unique_id: "qgames_paint_image"
+  topic: "qGames/paint/image"
+  device:
+    identifiers: ["qgames_paint"]
+    name: "qGames Paint"
+    manufacturer: "qGames"
+    model: "Paint"

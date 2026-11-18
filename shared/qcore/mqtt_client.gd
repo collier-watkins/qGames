@@ -206,6 +206,13 @@ func stats() -> Dictionary:
 	}
 
 
+## Where this client would publish, in a form fit for a log line. The empty
+## host is spelled out rather than left blank: "no broker" is a diagnosis, and
+## an empty string in a log reads as a bug in the log.
+func endpoint_label() -> String:
+	return ("%s:%d" % [host, port]) if host != "" else "(no broker)"
+
+
 # ── packet encoding (pure, unit-tested) ───────────────────────────────────────
 
 static func encode_remaining_length(n: int) -> PackedByteArray:

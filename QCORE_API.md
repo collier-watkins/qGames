@@ -20,7 +20,14 @@ Telemetry, then QDebug (it reads Telemetry).
     QConfig.get_value(key: String, fallback = null)   # "mqtt/broker", "telemetry/enabled", ...
     QConfig.platform() -> String                      # "linux" | "android"
     QConfig.reload() -> void
-Layers: baked defaults < user://config.cfg < QGAMES_* env vars.
+Layers: baked defaults < res://build_config.cfg < user://config.cfg < env.
+`res://build_config.cfg` is written at EXPORT time by tools/bake_config.sh and
+travels inside the .pck — it is how a shipped game reaches the broker with no
+environment set up, which matters because a .desktop launcher does not inherit
+your shell. It also means a stale broker address SHIPS: re-bake and re-export
+after the network changes, and confirm with `make selftest`.
+MQTT keys also answer to bare MQTT_BROKER / MQTT_PORT / MQTT_USERNAME /
+MQTT_PASSWORD / MQTT_TOPIC_PREFIX; QGAMES_-prefixed names win over those.
 
 Keys: mqtt/broker, mqtt/port, mqtt/username, mqtt/password, mqtt/topic_prefix,
 telemetry/enabled, telemetry/perf_interval_sec, debug/hud, debug/hud_start,
@@ -38,7 +45,7 @@ debug/hud_hz, debug/hud_stdout.
         # "<game>/ts" is appended automatically, LAST. Never add it yourself.
         # Example: Telemetry.report([["moves", 14], ["result", "win"]])
     Telemetry.report_result(result: String, score: int, score_unit: String,
-                            extra: Array = []) -> void
+                            extra: Array = [], retained: Array = []) -> void
         # THE call for a finished round. Publishes the common schema:
         #   result, score, score_unit, duration_s, <extra...>, ts
         # duration_s is measured from the previous report_result (or launch).
@@ -49,6 +56,20 @@ debug/hud_hz, debug/hud_stdout.
     Telemetry.report_image(subtopic: String, png: PackedByteArray, pairs: Array = []) -> void
     Telemetry.io_stats() -> Dictionary   # for QDebug; games do not need it
     Telemetry.RESULT_WIN | RESULT_LOSS | RESULT_QUIT | RESULT_DONE
+        # chess also emits "draw", which is NOT in QTelemetrySchema.RESULTS.
+        # Anything matching on result has to allow it. Unresolved — see
+        # PROJECT_STATE.md.
+
+Every build answers `--telemetry-selftest`, which publishes one message to
+`<prefix>/_selftest/<game_id>` (never a game topic), prints where it tried to
+reach and what the client's counters say, and exits nonzero if nothing left the
+machine. It needs no GUI and no round to finish:
+
+    make selftest GAME=memory
+    ~/.local/share/qgames/memory/memory --headless -- --telemetry-selftest
+
+That exists because a WRONG broker and NO broker are indistinguishable from
+outside the process — both publish nothing, silently.
 
 The game id is DECLARED, not derived. Set it per game in project.godot:
 

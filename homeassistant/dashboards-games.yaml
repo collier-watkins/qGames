@@ -1,0 +1,272 @@
+# ---------------------------------------------------------------------------
+# Games — one pane for the qGames (gen2) suite.
+#
+# Rebuilt 2026-08-27. The gen1 version was a view inside Overview, stored in
+# .storage, and showed two games that no longer exist (Battleship, Simon) while
+# missing the two that do (Notes, Chess). This file replaces it; the old view
+# was deleted from .storage/lovelace.lovelace at the same time.
+#
+# Registered by packages/qgames.yaml, the same way the Network dashboard is
+# registered by packages/observability.yaml.
+#
+# SHAPE — every game gets the same section, in the same order:
+#   heading (icon + when it was last played)
+#   the common core: Result, Score, Duration
+#   a history graph of the score
+#   whatever is specific to that game
+#
+# That is the point of the gen2 wire schema: result / score / score_unit /
+# duration_s / ts are published by every game, so a section is boilerplate and
+# only the extras differ. Adding a game means copying a section and changing
+# the entity prefix.
+#
+# `&tile` / `&wide` / `&graph` are YAML anchors for the repeated grid_options
+# blocks. Lovelace has no loops, so this is as close to a template as the
+# format gets without a HACS card — and this HA deliberately avoids adding
+# HACS dependencies for layout (see dashboards/network.yaml).
+# ---------------------------------------------------------------------------
+title: Games
+
+views:
+
+  - title: Games
+    path: games
+    icon: mdi:gamepad-variant
+    type: sections
+    max_columns: 4
+    header:
+      card:
+        type: markdown
+        text_only: true
+        content: qGames
+
+    # sensor.qgames_last_activity is a template sensor in packages/qgames.yaml:
+    # the newest `ts` across every game, with the game's name as an attribute.
+    # One entity to watch instead of five.
+    badges:
+      - type: entity
+        entity: sensor.qgames_last_activity
+        name: Last played
+        show_state: true
+        show_icon: true
+
+    sections:
+
+      # ── Memory Match ────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:cards-playing-heart-multiple-outline
+            heading: Memory
+            heading_style: subtitle
+            badges:
+              - type: entity
+                entity: sensor.qgames_memory_last_played
+                show_state: true
+                show_icon: true
+
+          - type: tile
+            entity: sensor.qgames_memory_result
+            name: Result
+            grid_options: &tile
+              columns: 6
+              rows: 1
+
+          - type: tile
+            entity: sensor.qgames_memory_moves
+            name: Moves
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_memory_duration
+            name: Duration
+            grid_options: &wide
+              columns: 12
+              rows: 1
+
+          - type: history-graph
+            hours_to_show: 168
+            entities:
+              - entity: sensor.qgames_memory_moves
+                name: Moves per game
+            grid_options: &graph
+              columns: 12
+              rows: 3
+
+      # ── Chess ───────────────────────────────────────────────────────────
+      # The only game that can report `draw`, and the only one with a clock.
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:chess-king
+            heading: Chess
+            heading_style: subtitle
+            badges:
+              - type: entity
+                entity: sensor.qgames_chess_last_played
+                show_state: true
+                show_icon: true
+
+          - type: tile
+            entity: sensor.qgames_chess_result
+            name: Result
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_chess_moves
+            name: Moves
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_chess_difficulty
+            name: Level
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_chess_played_as
+            name: Played as
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_chess_termination
+            name: Termination
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_chess_duration
+            name: Duration
+            grid_options: *tile
+
+          - type: history-graph
+            hours_to_show: 168
+            entities:
+              - entity: sensor.qgames_chess_moves
+                name: Moves per game
+            grid_options: *graph
+
+          # The state is the first 250 characters of the PGN — a sensor state
+          # cannot hold more. Enough to read the headers and the opening; the
+          # whole game is on qGames/chess/pgn for anything that needs it.
+          - type: markdown
+            title: Last game (PGN, truncated)
+            content: >-
+              ```
+
+              {{ states('sensor.qgames_chess_pgn') }}
+
+              ```
+            grid_options: *graph
+
+      # ── Sequence ────────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:shape
+            heading: Sequence
+            heading_style: subtitle
+            badges:
+              - type: entity
+                entity: sensor.qgames_sequence_last_completed
+                show_state: true
+                show_icon: true
+
+          - type: tile
+            entity: sensor.qgames_sequence_score
+            name: Correct
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_sequence_total
+            name: Asked
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_sequence_duration
+            name: Duration
+            grid_options: *wide
+
+          - type: history-graph
+            hours_to_show: 168
+            entities:
+              - entity: sensor.qgames_sequence_score
+                name: Correct per round
+            grid_options: *graph
+
+      # ── Notes ───────────────────────────────────────────────────────────
+      # A "round" is a save, so Duration is the gap since the previous one.
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:notebook-outline
+            heading: Notes
+            heading_style: subtitle
+            badges:
+              - type: entity
+                entity: sensor.qgames_notes_last_saved
+                show_state: true
+                show_icon: true
+
+          - type: tile
+            entity: sensor.qgames_notes_title
+            name: Title
+            grid_options: *wide
+
+          - type: tile
+            entity: sensor.qgames_notes_words
+            name: Words
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_notes_characters
+            name: Characters
+            grid_options: *tile
+
+          - type: history-graph
+            hours_to_show: 168
+            entities:
+              - entity: sensor.qgames_notes_words
+                name: Words per save
+            grid_options: *graph
+
+          # Truncated to 250 characters for the same reason as the PGN above.
+          - type: markdown
+            title: Last note (truncated)
+            content: >-
+              {{ states('sensor.qgames_notes_content') }}
+            grid_options: *graph
+
+      # ── Paint ───────────────────────────────────────────────────────────
+      # No Duration tile: paint publishes duration_s hard-coded to 0.
+      - type: grid
+        cards:
+          - type: heading
+            icon: mdi:palette
+            heading: Paint
+            heading_style: subtitle
+            badges:
+              - type: entity
+                entity: sensor.qgames_paint_last_saved
+                show_state: true
+                show_icon: true
+
+          - type: tile
+            entity: sensor.qgames_paint_saved_file
+            name: File
+            grid_options: *wide
+
+          - type: tile
+            entity: sensor.qgames_paint_strokes
+            name: Strokes
+            grid_options: *tile
+
+          - type: tile
+            entity: sensor.qgames_paint_image_size
+            name: Size
+            grid_options: *tile
+
+          - type: picture-entity
+            entity: camera.qgames_paint_latest_image
+            camera_view: auto
+            fit_mode: contain
+            show_state: false
+            show_name: false

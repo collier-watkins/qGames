@@ -1,0 +1,337 @@
+# qGames — MQTT sensors. Rewritten 2026-08-27 for the gen2 (Godot) suite.
+#
+# WHAT CHANGED FROM GEN1
+#   Gone:     battleship, simon — those games do not exist in gen2.
+#   New:      notes, chess, and the common core (result/score/duration) that
+#             every gen2 game publishes.
+#   Retained: every gen1 unique_id whose topic still exists, so ten days of
+#             recorder history and every dashboard reference survive. A new
+#             unique_id would have created a second entity and orphaned the
+#             first — which is exactly how gen1 ended up with 16 dead ones.
+#
+# ── the wire schema ─────────────────────────────────────────────────────────
+# Every game publishes the same core under qGames/<game_id>/, in this order:
+#
+#   result       win | loss | draw | quit | done
+#   score        int — whatever that game counts
+#   score_unit   moves | correct | words | strokes — labels `score`
+#   duration_s   seconds the round took
+#   ts           unix seconds, ALWAYS published last
+#
+# Trigger automations off `ts`: qcore guarantees every other value has already
+# landed by the time it arrives, and it changes even when a result repeats.
+#
+# `score_unit` is published but deliberately has no sensor — the unit is baked
+# into each `Score` entity below, which is what makes it graphable. Add one if
+# an automation ever needs to read the label.
+#
+# ── how to add a game ───────────────────────────────────────────────────────
+# Copy a block. Give it its own device anchor, then merge that anchor and a
+# shape anchor into each entity: `<<: [*chess, *duration]`. The shapes carry
+# device_class/state_class/icon so no entity repeats them.
+#
+# Anchors are FILE-LOCAL — they were impossible while every MQTT sensor in the
+# house shared one file. That is why mqtt.yaml was split.
+#
+# ── validating a change ─────────────────────────────────────────────────────
+# `ha core check` does NOT validate this file's schema. MQTT's per-entity
+# schema is only applied when the config entry sets up or is reloaded, so a bad
+# option passes the check and then silently drops EVERY mqtt sensor in the
+# house -- one invalid item invalidates the whole list. Check the real thing:
+#
+#   call the mqtt.reload service, then read the log
+#
+# It refuses with the offending file and line. Two options that look right and
+# are not: `has_entity_name` (not accepted here -- a `device:` block already
+# makes the friendly name "<device> <entity>"), and `| isoformat` (a datetime
+# METHOD, not a filter, so it must be `(...).isoformat()`).
+#
+# NOT IMPLEMENTED UPSTREAM: availability. Nothing on the wire says whether a
+# game is running, so every entity here is "last known value" with no way to
+# tell live from stale. The planned fix is a retained qGames/<game>/state, set
+# on launch and on quit -- NOT an MQTT Last Will: QMqttClient connects per
+# batch and disconnects cleanly after every publish, so a will would fire
+# seconds after every report. Either way it is a qcore change, not one here.
+# ---------------------------------------------------------------------------
+
+
+# ── Memory Match ────────────────────────────────────────────────────────────
+# The first block also defines the shared shapes. `<<:` takes a LIST of
+# mappings, so an entity merges its game's device block and a shape in one go.
+- <<:
+    - &memory
+      device: &dev_memory
+        identifiers: ["qgames_memory"]
+        name: "qGames Memory"
+        manufacturer: "qGames"
+        model: "Memory Match"
+    # Unix seconds on the wire. device_class: timestamp needs ISO 8601 WITH an
+    # offset, so the template cannot be `timestamp_local` — that drops the
+    # offset and the entity goes unavailable. Worth the conversion: a timestamp
+    # entity renders as "4 minutes ago" and survives a restart, where the
+    # `last_changed` the old dashboard displayed resets to the restart time.
+    - &ts
+      device_class: timestamp
+      value_template: "{{ (value | int | as_datetime | as_local).isoformat() }}"
+      icon: "mdi:clock-outline"
+  name: "Last Played"
+  unique_id: "qgames_memory_ts"
+  state_topic: "qGames/memory/ts"
+
+- <<:
+    - *memory
+    - &result
+      icon: "mdi:trophy"
+  name: "Result"
+  unique_id: "qgames_memory_result"
+  state_topic: "qGames/memory/result"
+
+# unique_id and name are gen1's, so sensor.qgames_memory_moves keeps its
+# history — but the topic is now the common `score`. Memory's score IS its move
+# count, so the meaning is unchanged. The legacy `moves` topic is still
+# published by the game and nothing listens to it any more.
+- <<:
+    - *memory
+    - &count
+      state_class: measurement
+  name: "Moves"
+  unique_id: "qgames_memory_moves"
+  state_topic: "qGames/memory/score"
+  unit_of_measurement: "moves"
+  icon: "mdi:cards"
+
+- <<:
+    - *memory
+    - &duration
+      unit_of_measurement: "s"
+      device_class: duration
+      state_class: measurement
+      icon: "mdi:timer-outline"
+  name: "Duration"
+  unique_id: "qgames_memory_duration"
+  state_topic: "qGames/memory/duration_s"
+
+
+# ── Sequence ────────────────────────────────────────────────────────────────
+- <<:
+    - &sequence
+      device: &dev_sequence
+        identifiers: ["qgames_sequence"]
+        name: "qGames Sequence"
+        manufacturer: "qGames"
+        model: "Sequence"
+    - *ts
+  name: "Last Completed"
+  unique_id: "qgames_sequence_ts"
+  state_topic: "qGames/sequence/ts"
+
+# This unique_id already had a registry row from an earlier config; reusing it
+# adopts that row instead of leaving it behind as a dead entity.
+- <<: [*sequence, *result]
+  name: "Result"
+  unique_id: "qgames_sequence_result"
+  state_topic: "qGames/sequence/result"
+
+- <<: [*sequence, *count]
+  name: "Score"
+  unique_id: "qgames_sequence_score"
+  state_topic: "qGames/sequence/score"
+  unit_of_measurement: "correct"
+  icon: "mdi:star"
+
+- <<: [*sequence, *count]
+  name: "Total"
+  unique_id: "qgames_sequence_total"
+  state_topic: "qGames/sequence/total"
+  unit_of_measurement: "questions"
+  icon: "mdi:counter"
+
+- <<: [*sequence, *duration]
+  name: "Duration"
+  unique_id: "qgames_sequence_duration"
+  state_topic: "qGames/sequence/duration_s"
+
+
+# ── Paint ───────────────────────────────────────────────────────────────────
+# No Duration entity: paint publishes duration_s hard-coded to 0 (a drawing pad
+# has no round to time). Fix that upstream before adding one here.
+- <<:
+    - &paint
+      device: &dev_paint
+        identifiers: ["qgames_paint"]
+        name: "qGames Paint"
+        manufacturer: "qGames"
+        model: "Paint"
+    - *ts
+  name: "Last Saved"
+  unique_id: "qgames_paint_ts"
+  state_topic: "qGames/paint/ts"
+
+- <<: [*paint]
+  name: "Saved File"
+  unique_id: "qgames_paint_saved"
+  state_topic: "qGames/paint/saved"
+  icon: "mdi:file-image-outline"
+
+- <<: [*paint, *count]
+  name: "Strokes"
+  unique_id: "qgames_paint_score"
+  state_topic: "qGames/paint/score"
+  unit_of_measurement: "strokes"
+  icon: "mdi:brush"
+
+# The picture is published at full size, retained — about 14 KB for the one
+# currently on the broker, up to ~87 KB for a busy 1280x720 canvas.
+- <<: [*paint, *count]
+  name: "Image Size"
+  unique_id: "qgames_paint_image_bytes"
+  state_topic: "qGames/paint/image_bytes"
+  unit_of_measurement: "B"
+  device_class: data_size
+  icon: "mdi:image-size-select-large"
+
+
+# ── Notes ───────────────────────────────────────────────────────────────────
+# A "round" here is a save, so Duration is the time since the previous one.
+- <<:
+    - &notes
+      device: &dev_notes
+        identifiers: ["qgames_notes"]
+        name: "qGames Notes"
+        manufacturer: "qGames"
+        model: "Notes"
+    - *ts
+  name: "Last Saved"
+  unique_id: "qgames_notes_ts"
+  state_topic: "qGames/notes/ts"
+
+- <<: [*notes, *count]
+  name: "Words"
+  unique_id: "qgames_notes_score"
+  state_topic: "qGames/notes/score"
+  unit_of_measurement: "words"
+  icon: "mdi:text"
+
+- <<: [*notes, *count]
+  name: "Characters"
+  unique_id: "qgames_notes_chars"
+  state_topic: "qGames/notes/chars"
+  unit_of_measurement: "chars"
+  icon: "mdi:format-letter-case"
+
+- <<: [*notes, *duration]
+  name: "Since Last Save"
+  unique_id: "qgames_notes_duration"
+  state_topic: "qGames/notes/duration_s"
+
+- <<: [*notes]
+  name: "Title"
+  unique_id: "qgames_notes_title"
+  state_topic: "qGames/notes/title"
+  icon: "mdi:format-title"
+
+- <<: [*notes]
+  name: "Filename"
+  unique_id: "qgames_notes_filename"
+  state_topic: "qGames/notes/filename"
+  icon: "mdi:file-document-outline"
+
+# RETAINED on the broker and published BEFORE the scalars, so a dashboard that
+# restarts an hour later still has the note.
+#
+# A sensor STATE is capped at 255 characters and a longer one makes the entity
+# unavailable, so this is truncated ON PURPOSE. The full Markdown is on the
+# topic — read it with an MQTT trigger or a template, do not widen this.
+- <<:
+    - *notes
+    - &truncated
+      value_template: "{{ value[:250] }}"
+  name: "Content"
+  unique_id: "qgames_notes_content"
+  state_topic: "qGames/notes/content"
+  icon: "mdi:text-long"
+
+
+# ── Chess ───────────────────────────────────────────────────────────────────
+- <<:
+    - &chess
+      device: &dev_chess
+        identifiers: ["qgames_chess"]
+        name: "qGames Chess"
+        manufacturer: "qGames"
+        model: "Chess"
+    - *ts
+  name: "Last Played"
+  unique_id: "qgames_chess_ts"
+  state_topic: "qGames/chess/ts"
+
+# Chess is the only game that can report `draw`, which is outside the four
+# results the schema documents. Anything matching on result must allow it.
+- <<: [*chess, *result]
+  name: "Result"
+  unique_id: "qgames_chess_result"
+  state_topic: "qGames/chess/result"
+
+- <<: [*chess, *count]
+  name: "Moves"
+  unique_id: "qgames_chess_score"
+  state_topic: "qGames/chess/score"
+  unit_of_measurement: "moves"
+  icon: "mdi:chess-pawn"
+
+- <<: [*chess, *duration]
+  name: "Duration"
+  unique_id: "qgames_chess_duration"
+  state_topic: "qGames/chess/duration_s"
+
+- <<: [*chess]
+  name: "Difficulty"
+  unique_id: "qgames_chess_level_name"
+  state_topic: "qGames/chess/level_name"
+  icon: "mdi:speedometer"
+
+- <<: [*chess]
+  name: "Played As"
+  unique_id: "qgames_chess_played_as"
+  state_topic: "qGames/chess/played_as"
+  icon: "mdi:chess-king"
+
+- <<: [*chess]
+  name: "Termination"
+  unique_id: "qgames_chess_termination"
+  state_topic: "qGames/chess/termination"
+  icon: "mdi:flag-checkered"
+
+- <<: [*chess]
+  name: "Time Control"
+  unique_id: "qgames_chess_time_control"
+  state_topic: "qGames/chess/time_control"
+  icon: "mdi:timer-sand"
+
+# -1 means an unlimited clock, not "no time left".
+- <<: [*chess, *duration]
+  name: "Clock Left"
+  unique_id: "qgames_chess_clock_left"
+  state_topic: "qGames/chess/clock_left_s"
+
+- <<: [*chess, *count]
+  name: "Plies"
+  unique_id: "qgames_chess_plies"
+  state_topic: "qGames/chess/plies"
+  entity_category: diagnostic
+  icon: "mdi:format-list-numbered"
+
+# RETAINED, published before the scalars. chess.com export shape — headers plus
+# {[%clk H:MM:SS.t]} after every move — so it pastes into any board viewer.
+# Truncated for the same 255-character reason as the note above.
+- <<: [*chess, *truncated]
+  name: "PGN"
+  unique_id: "qgames_chess_pgn"
+  state_topic: "qGames/chess/pgn"
+  icon: "mdi:chess-rook"
+
+- <<: [*chess]
+  name: "Final Position"
+  unique_id: "qgames_chess_fen"
+  state_topic: "qGames/chess/fen"
+  icon: "mdi:checkerboard"

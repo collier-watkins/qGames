@@ -2,9 +2,11 @@
 # Build on this machine for whatever the target actually is, copy it there, and
 # install it. One command, no toolchain on the target.
 #
-#   tools/deploy.sh pi@raspberrypi.local
-#   tools/deploy.sh pi@192.168.1.50 notes          just one game
-#   tools/deploy.sh pi@host --dry-run              show the plan, change nothing
+#   tools/deploy.sh qpi                            the games Pi (q@10.118.25.17)
+#   tools/deploy.sh qpi notes                      just one game
+#   tools/deploy.sh qpi --dry-run                  show the plan, change nothing
+#
+# `make deploy` is the same thing with the target already filled in.
 #
 # The target needs only ssh and a shell. It does NOT need Godot, a compiler, or
 # any runtime package: Godot ships prebuilt export templates for every

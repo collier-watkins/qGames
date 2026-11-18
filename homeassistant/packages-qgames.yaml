@@ -1,0 +1,73 @@
+# ---------------------------------------------------------------------------
+# qGames — everything that is not an MQTT entity.
+#
+# The sensors themselves live in mqtt_sensors/qgames.yaml and
+# mqtt_cameras/qgames.yaml, reached through mqtt.yaml. They are NOT here
+# because `mqtt:` is a dict-shaped key: configuration.yaml already owns it, and
+# a package that also declared it would collide on the `sensor` key.
+#
+# Written 2026-08-27 alongside the gen2 rewrite.
+# ---------------------------------------------------------------------------
+
+# One "when was anyone last playing anything" entity, so a card or an
+# automation does not have to know which games exist. Add a game by adding a
+# line to the list below — nothing else changes.
+template:
+  - sensor:
+      - name: "qGames Last Activity"
+        unique_id: qgames_last_activity
+        device_class: timestamp
+        icon: mdi:gamepad-variant
+        state: >-
+          {% set ns = namespace(when=none, game=none) %}
+          {% for entity, label in [
+              ('sensor.qgames_memory_last_played',    'Memory'),
+              ('sensor.qgames_sequence_last_completed','Sequence'),
+              ('sensor.qgames_paint_last_saved',      'Paint'),
+              ('sensor.qgames_notes_last_saved',      'Notes'),
+              ('sensor.qgames_chess_last_played',     'Chess')] %}
+            {% set when = states(entity) | as_datetime %}
+            {% if when is not none and (ns.when is none or when > ns.when) %}
+              {% set ns.when = when %}
+              {% set ns.game = label %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.when.isoformat() if ns.when is not none else none }}
+        attributes:
+          game: >-
+            {% set ns = namespace(when=none, game='none') %}
+            {% for entity, label in [
+                ('sensor.qgames_memory_last_played',    'Memory'),
+                ('sensor.qgames_sequence_last_completed','Sequence'),
+                ('sensor.qgames_paint_last_saved',      'Paint'),
+                ('sensor.qgames_notes_last_saved',      'Notes'),
+                ('sensor.qgames_chess_last_played',     'Chess')] %}
+              {% set when = states(entity) | as_datetime %}
+              {% if when is not none and (ns.when is none or when > ns.when) %}
+                {% set ns.when = when %}
+                {% set ns.game = label %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.game }}
+
+# ---------------------------------------------------------------------------
+# The Games dashboard, in YAML rather than through the UI so it diffs and
+# restores — the same reason packages/observability.yaml keeps the Network one
+# in a file. The gen1 version lived in .storage/lovelace.lovelace as a view of
+# Overview and was deleted when this replaced it.
+#
+# `mode:` is deliberately ABSENT. packages/observability.yaml already declares
+# `lovelace: mode: storage` for the Network dashboard, and packages merge by
+# key — declaring it twice is a duplicate-key error at startup, not a no-op.
+# Only `dashboards:` is merged here, and its child keys are disjoint.
+# ---------------------------------------------------------------------------
+lovelace:
+  dashboards:
+    # The key IS the url path, and HA requires a hyphen in it so a dashboard
+    # can never collide with a built-in panel. Hence q-games, not qgames.
+    q-games:
+      mode: yaml
+      title: Games
+      icon: mdi:gamepad-variant
+      show_in_sidebar: true
+      filename: dashboards/games.yaml
