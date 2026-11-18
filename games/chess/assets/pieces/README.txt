@@ -16,6 +16,11 @@ Each generated file carries one marker comment near the top. Delete that line
 when you edit a piece: it is what tells the test suite the file is yours and
 should no longer be checked against the artwork drawn in code.
 
+The set shipped here is Colin M.L. Burnett's (Wikimedia Commons), BSD-licensed,
+with the bishops' cross changed to the classic slit. `make chess-pieces-repo`
+OVERWRITES it with the drawn set. Licence:
+see LICENSE.txt.
+
 Delete a file and that piece falls back to the one drawn in code, so you can
 replace them one at a time. Delete all of them and you get the built-in set
 back. Re-run with --dump-pieces to start over from the built-in artwork.

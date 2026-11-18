@@ -38,6 +38,8 @@ func _initialize() -> void:
 	_test_audio_cues()
 	_test_easing()
 	_test_piece_set_files()
+	_test_danger_squares()
+	_test_take_chains()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -984,3 +986,148 @@ func _test_repo_piece_set_ships() -> void:
 		_check("the icon is valid SVG the engine can rasterise",
 				icon_img.load_svg_from_string(ChessPieces.to_icon_svg(), 1.0) == OK
 				and icon_img.get_width() >= 8)
+
+
+func _test_danger_squares() -> void:
+	## Training mode's danger squares: every square where the opponent could
+	## LEGALLY take one of a side's pieces. Attacked-but-pinned, and a king
+	## facing a protected square, are the cases a ray scan gets wrong.
+	var sq := func(n: String) -> int: return B.square_from_name(n)
+
+	var start := B.new()
+	_eq("nothing can be taken at the start", start.capturable(B.WHITE).size(), 0)
+
+	var simple := B.new("4k3/8/8/3p4/4N3/8/8/4K3 w - - 0 1")
+	var fen_before: String = simple.fen()
+	_check("a knight a pawn attacks is in danger, asked on its own turn",
+			simple.capturable(B.WHITE) == PackedInt32Array([sq.call("e4")]))
+	_eq("...and asking changes nothing", simple.fen(), fen_before)
+	var simple_b := B.new("4k3/8/8/3p4/4N3/8/8/4K3 b - - 0 1")
+	_check("...and on the opponent's turn",
+			simple_b.capturable(B.WHITE) == PackedInt32Array([sq.call("e4")]))
+
+	var pinned := B.new("4k3/8/8/4n3/4R3/3P4/8/4K3 w - - 0 1")
+	_check("the pinned knight does attack the pawn", pinned.is_attacked(sq.call("d3"), B.BLACK))
+	_eq("...but cannot take it, so it is not in danger", pinned.capturable(B.WHITE).size(), 0)
+
+	var ep := B.new("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")
+	_check("a pawn that can be taken en passant is in danger",
+			ep.capturable(B.BLACK).has(sq.call("d5")))
+	_eq("...but en passant is not handed to the side that cannot use it",
+			B.new("4k3/8/8/3pP3/8/8/8/4K3 b - d6 0 1").capturable(B.BLACK).size(), 0)
+
+	_eq("a king is never shaded — that is check",
+			B.new("4k3/8/8/8/8/8/3q4/4K3 w - - 0 1").capturable(B.WHITE).size(), 0)
+
+	var hang := B.new("4k3/8/8/3p4/8/8/5N2/4K3 w - - 0 1")
+	var hang_fen: String = hang.fen()
+	_check("a move onto a pawn's diagonal hangs the knight",
+			hang.move_hangs(hang.move_from_uci("f2e4")))
+	_check("...and a safe square does not",
+			not hang.move_hangs(hang.move_from_uci("f2d3")))
+	_eq("...and asking changes nothing", hang.fen(), hang_fen)
+
+	# The take squares themselves — empty ones included.
+	var names := func(squares: PackedInt32Array) -> Array:
+		var out: Array = []
+		for s in squares:
+			out.append(B.square_name(s))
+		out.sort()
+		return out
+	var lone := B.new("4k3/8/8/3p4/8/8/8/4K3 w - - 0 1")
+	var lone_fen: String = lone.fen()
+	_eq("a pawn's and a king's take squares are danger squares, empty or not",
+			names.call(lone.danger_squares(B.WHITE)),
+			["c4", "d7", "d8", "e4", "e7", "f7", "f8"])
+	_eq("...and asking changes nothing", lone.fen(), lone_fen)
+
+	var start_danger: Array = names.call(start.danger_squares(B.WHITE))
+	var rank6: bool = true
+	var mid_clear: bool = true
+	for f in "abcdefgh":
+		rank6 = rank6 and start_danger.has(f + "6")
+		for r in ["3", "4", "5"]:
+			mid_clear = mid_clear and not start_danger.has(f + r)
+	_check("at the start every square on the sixth rank is a take square", rank6)
+	_check("...and the middle of the board is not", mid_clear)
+
+	var pin_map: Array = names.call(
+			B.new("4k3/8/8/4n3/4R3/8/8/4K3 w - - 0 1").danger_squares(B.WHITE))
+	_check("a pinned knight's take squares are not danger squares",
+			not pin_map.has("d3") and not pin_map.has("f3") and not pin_map.has("c4"))
+
+	var guarded: Array = names.call(
+			B.new("4k3/8/4R3/8/8/8/8/4K3 w - - 0 1").danger_squares(B.WHITE))
+	_check("a king cannot take on a square the other side protects",
+			not guarded.has("e7") and guarded.has("d7"))
+
+	var defended: Array = names.call(
+			B.new("4k3/8/8/3p4/4p3/8/8/4K3 w - - 0 1").danger_squares(B.WHITE))
+	_check("a protected enemy piece is a danger square — taking it gets you taken",
+			defended.has("e4") and not defended.has("d5"))
+
+	# Attack squares are the same question asked for the other side.
+	var start_attack: Array = names.call(start.danger_squares(B.BLACK))
+	var rank3: bool = true
+	for f in "abcdefgh":
+		rank3 = rank3 and start_attack.has(f + "3")
+	_check("attack squares: at the start White can take on every square of the third rank",
+			rank3 and not start_attack.has("e4"))
+
+	# One piece's take squares — the piece a player points at.
+	_eq("a pointed-at pawn's take squares are its two diagonals",
+			names.call(lone.danger_squares(B.WHITE, B.square_from_name("d5"))), ["c4", "e4"])
+	_eq("...and a pointed-at king's are the squares round it",
+			names.call(lone.danger_squares(B.WHITE, B.square_from_name("e8"))),
+			["d7", "d8", "e7", "f7", "f8"])
+	_eq("a pinned piece pointed at has none",
+			B.new("4k3/8/8/4n3/4R3/8/8/4K3 w - - 0 1").danger_squares(
+					B.WHITE, B.square_from_name("e5")).size(), 0)
+
+
+func _test_take_chains() -> void:
+	## The exchange on a square: who takes, in order, cheapest first, and what
+	## it is worth to the first taker when nobody plays past the point it pays.
+	var sq := func(n: String) -> int: return B.square_from_name(n)
+	var froms := func(chain: Dictionary) -> Array:
+		var out: Array = []
+		for s: Dictionary in chain["steps"]:
+			out.append(B.square_name(int(s["from"])))
+		return out
+
+	var hanging := B.new("4k3/8/8/3p4/4N3/8/8/4K3 w - - 0 1")
+	var fen_before: String = hanging.fen()
+	var c1: Dictionary = hanging.take_chain(sq.call("e4"))
+	_eq("an undefended knight: the pawn takes and that is all", froms.call(c1), ["d5"])
+	_eq("...worth a knight to them", int(c1["worth"]), 3)
+	_eq("...and it is in danger", hanging.pieces_in_danger(B.WHITE), {sq.call("e4"): 3})
+	_eq("...and working it out changes nothing", hanging.fen(), fen_before)
+	_eq("the sentence says who takes and what it costs",
+			ChessBoardView.explain_chain(hanging, sq.call("e4"), c1, B.WHITE),
+			"Your knight: they take with their pawn. You lose 3 points.")
+
+	var even := B.new("4k3/8/5n2/8/4N3/3P4/8/4K3 w - - 0 1")
+	var c2: Dictionary = even.take_chain(sq.call("e4"))
+	_eq("knight for knight: they take, the pawn takes back", froms.call(c2), ["f6", "d3"])
+	_eq("...an even trade", int(c2["worth"]), 0)
+	_eq("...still marked, as an even trade", even.pieces_in_danger(B.WHITE), {sq.call("e4"): 0})
+
+	var guarded := B.new("4k3/8/8/8/r3N3/3P4/8/4K3 w - - 0 1")
+	var c3: Dictionary = guarded.take_chain(sq.call("e4"))
+	_eq("a rook taking a pawn-protected knight loses two", int(c3["worth"]), -2)
+	_eq("...so nobody sensible starts it", int(c3["played"]), 0)
+	_eq("...and the knight is not in danger", guarded.pieces_in_danger(B.WHITE).size(), 0)
+	_check("...and the sentence says it is protected",
+			ChessBoardView.explain_chain(guarded, sq.call("e4"), c3, B.WHITE)
+			.begins_with("Your knight is protected"))
+
+	var xray := B.new("4k3/4q3/4r3/8/4N3/3P4/8/4K3 w - - 0 1")
+	_eq("the queen behind the rook joins the chain once the rook has gone",
+			froms.call(xray.take_chain(sq.call("e4"))), ["e6", "d3", "e7"])
+
+	# The f3 pawn guards e4 but is pinned to the d1 king by the h5 bishop.
+	var pinned := B.new("4k3/8/8/3p3b/4N3/5P2/8/3K4 w - - 0 1")
+	_eq("a recapture by a piece pinned to its king is not counted",
+			froms.call(pinned.take_chain(sq.call("e4"))), ["d5"])
+	_eq("kings are never put in a chain as the target",
+			B.new("4k3/8/8/8/8/8/3q4/4K3 w - - 0 1").take_chain(sq.call("e1")), {})

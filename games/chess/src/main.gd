@@ -73,6 +73,10 @@ var _setup_box: VBoxContainer = null
 var _setup_groups: HFlowContainer = null
 var _promo: Control = null
 var _endcard: Control = null
+var _training_card: Control = null
+var _training_scroll: ScrollContainer = null
+var _training_box: VBoxContainer = null
+var _btn_training: Button = null
 
 ## -1 means "live". Any other value is a ply index being reviewed, during which
 ## the board is read-only.
@@ -87,6 +91,14 @@ var _pref_increment: int = 0
 var _thinking_dots: float = 0.0
 var _audio: ChessAudio = null
 var _pref_sound: bool = true
+## Training mode: a master switch and one switch per aid under it, so an aid
+## keeps its setting while training as a whole is turned off and on again.
+var _pref_training: bool = false
+var _pref_train_danger: bool = true
+var _pref_train_attack: bool = true
+var _pref_train_hover: bool = true
+var _pref_train_chains: bool = true
+var _explain: Label = null
 
 
 ## Command-line switch, honoured in an exported build as well as in the editor.
@@ -205,6 +217,11 @@ func _load_prefs() -> void:
 	_pref_base = int(QConfig.get_value("chess/base_seconds", 600))
 	_pref_increment = int(QConfig.get_value("chess/increment_seconds", 0))
 	_pref_sound = bool(QConfig.get_value("chess/sound", true))
+	_pref_training = bool(QConfig.get_value("chess/training", false))
+	_pref_train_danger = bool(QConfig.get_value("chess/training_danger", true))
+	_pref_train_attack = bool(QConfig.get_value("chess/training_attack", true))
+	_pref_train_hover = bool(QConfig.get_value("chess/training_hover_only", true))
+	_pref_train_chains = bool(QConfig.get_value("chess/training_chains", true))
 
 
 func _save_prefs() -> void:
@@ -216,6 +233,11 @@ func _save_prefs() -> void:
 	QConfig.set_value("chess/base_seconds", _pref_base)
 	QConfig.set_value("chess/increment_seconds", _pref_increment)
 	QConfig.set_value("chess/sound", _pref_sound)
+	QConfig.set_value("chess/training", _pref_training)
+	QConfig.set_value("chess/training_danger", _pref_train_danger)
+	QConfig.set_value("chess/training_attack", _pref_train_attack)
+	QConfig.set_value("chess/training_hover_only", _pref_train_hover)
+	QConfig.set_value("chess/training_chains", _pref_train_chains)
 	QConfig.save()
 
 
@@ -240,6 +262,7 @@ func _build_ui() -> void:
 	print("chess: pieces from ", _board_view.art.source)
 	_board_view.move_attempted.connect(_on_move_attempted)
 	_board_view.square_touched.connect(_on_square_touched)
+	_board_view.chain_explained.connect(_on_chain_explained)
 	add_child(_board_view)
 
 	_panel = PanelContainer.new()
@@ -261,6 +284,13 @@ func _build_ui() -> void:
 	_status = _make_label("", 15, C_DIM)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_panel_box.add_child(_status)
+
+	# Training mode's take chain in words. Its own label rather than the status
+	# line, which is rewritten every frame while the computer thinks.
+	_explain = _make_label("", 15, C_TEXT)
+	_explain.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_explain.visible = false
+	_panel_box.add_child(_explain)
 
 	_moves_list = ItemList.new()
 	_moves_list.max_columns = 2
@@ -295,6 +325,9 @@ func _build_ui() -> void:
 	buttons.add_child(_make_button("Flip", _on_flip))
 	buttons.add_child(_btn_resign)
 	buttons.add_child(_make_button("New game", _show_setup))
+	_btn_training = _make_button("Training", _show_training)
+	buttons.add_child(_btn_training)
+	_refresh_training_button()
 	_btn_sound = Button.new()
 	_btn_sound.text = "Sound"
 	_btn_sound.toggle_mode = true
@@ -394,6 +427,7 @@ func _relayout() -> void:
 		_panel.size = Vector2(size.x - PAD * 2.0, ph)
 	_arm_layout()
 	_fit_setup()
+	_fit_training()
 	_fit_buttons.call_deferred()
 	queue_redraw()
 
@@ -659,6 +693,7 @@ func _start_game() -> void:
 	_board_view.show_position(_game.board)
 	_board_view.skip_animations()
 	_board_view.interactive = true
+	_apply_training()
 	_review_ply = -1
 	_setup_scroll = null
 	_setup_box = null
@@ -690,6 +725,8 @@ func _process(delta: float) -> void:
 		var moved: bool = false
 		if _setup != null:
 			moved = _fit_setup()
+		if _fit_training():
+			moved = true
 		# Same reason as the setup card: get_line_count() is only right after a
 		# layout pass, and a single deferred call after a resize can still read
 		# the pre-wrap answer.
@@ -1044,6 +1081,189 @@ func _update_status() -> void:
 		_status.text = "Check!" if _game.is_human_turn() else "You have given check"
 		return
 	_status.text = "Your move" if _game.is_human_turn() else "Computer's move"
+
+
+# ------------------------------------------------------------------ training
+
+func _apply_training() -> void:
+	## Pushes the training switches into the board. Danger squares are the
+	## computer's take squares, i.e. danger to the HUMAN's pieces only: the
+	## computer's hanging pieces are the child's to find, and shading them
+	## would be playing the game for them.
+	if _board_view == null or _game == null:
+		return
+	var danger: bool = _pref_training and _pref_train_danger
+	var attack: bool = _pref_training and _pref_train_attack
+	var chains: bool = _pref_training and _pref_train_chains
+	_board_view.set_training(_game.human_side if danger else 0,
+			_game.human_side if attack else 0, _pref_train_hover,
+			_game.human_side if chains else 0)
+	_refresh_training_button()
+
+
+func _on_chain_explained(text: String) -> void:
+	_explain.text = text
+	_explain.visible = text != ""
+
+
+func _refresh_training_button() -> void:
+	if _btn_training != null:
+		_btn_training.text = "Training: on" if _pref_training else "Training"
+
+
+func _show_training() -> void:
+	_clear_overlay("_training_card")
+	var veil := _make_veil(0.70)
+	var card := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = C_PANEL
+	sb.border_color = C_PANEL_LINE
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(14)
+	sb.set_content_margin_all(20)
+	card.add_theme_stylebox_override("panel", sb)
+	veil.get_child(0).add_child(card)
+
+	# Scrolls for the same reason the setup card does: at a large reading size
+	# the logical viewport is ~450 px tall and three switches with their
+	# sentences are taller than that.
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	card.add_child(scroll)
+	_training_scroll = scroll
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	box.custom_minimum_size = Vector2(380, 0)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(box)
+	_training_box = box
+
+	var title := _make_label("Training", 26, C_TEXT)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+
+	var master := _training_switch("Training mode", _pref_training)
+	box.add_child(master)
+
+	# One row per aid. Each is a switch and a sentence saying what it shows,
+	# in words a child can be read: the name alone means nothing to them.
+	# Two aids to a row when the screen is wide enough: four switches with
+	# their sentences in one column were taller than a 1280x720 screen and put
+	# Done below the fold. Each aid is its own cell, switch over sentence.
+	var aids := GridContainer.new()
+	aids.columns = 2 if size.x >= 860.0 else 1
+	aids.add_theme_constant_override("h_separation", 24)
+	aids.add_theme_constant_override("v_separation", 12)
+	box.add_child(aids)
+	var danger := _training_switch("Danger squares", _pref_train_danger)
+	var danger_cell := _training_cell(aids)
+	danger_cell.add_child(danger)
+	var danger_why := _make_label("Red: where the computer's pieces could take yours. "
+			+ "A red dot means that move lets your piece be taken.", 15, C_DIM)
+	danger_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	danger_why.custom_minimum_size = Vector2(340, 0)
+	danger_cell.add_child(danger_why)
+	var attack := _training_switch("Attack squares", _pref_train_attack)
+	var attack_cell := _training_cell(aids)
+	attack_cell.add_child(attack)
+	var attack_why := _make_label("Blue: where your pieces could take the computer's. "
+			+ "Half and half: both sides can take there.", 15, C_DIM)
+	attack_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	attack_why.custom_minimum_size = Vector2(340, 0)
+	attack_cell.add_child(attack_why)
+	var hover := _training_switch("Only the piece I point at", _pref_train_hover)
+	var hover_cell := _training_cell(aids)
+	hover_cell.add_child(hover)
+	var hover_why := _make_label("Point at a piece, or tap it, to see the squares it "
+			+ "can take on. Off: every square is shown all the time.", 15, C_DIM)
+	hover_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hover_why.custom_minimum_size = Vector2(340, 0)
+	hover_cell.add_child(hover_why)
+	var chains := _training_switch("Take chains", _pref_train_chains)
+	var chains_cell := _training_cell(aids)
+	chains_cell.add_child(chains)
+	var chains_why := _make_label("A ! marks your pieces in danger. Point at a piece to see "
+			+ "who would take it, in order. Faded: nobody sensible goes that far.", 15, C_DIM)
+	chains_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	chains_why.custom_minimum_size = Vector2(340, 0)
+	chains_cell.add_child(chains_why)
+
+	var dim_aids := func() -> void:
+		danger.disabled = not _pref_training
+		attack.disabled = not _pref_training
+		hover.disabled = not _pref_training
+		chains.disabled = not _pref_training
+		aids.modulate.a = 1.0 if _pref_training else 0.45
+	dim_aids.call()
+
+	master.toggled.connect(func(on: bool) -> void:
+		_pref_training = on
+		dim_aids.call()
+		_save_prefs()
+		_apply_training())
+	danger.toggled.connect(func(on: bool) -> void:
+		_pref_train_danger = on
+		_save_prefs()
+		_apply_training())
+	attack.toggled.connect(func(on: bool) -> void:
+		_pref_train_attack = on
+		_save_prefs()
+		_apply_training())
+	hover.toggled.connect(func(on: bool) -> void:
+		_pref_train_hover = on
+		_save_prefs()
+		_apply_training())
+	chains.toggled.connect(func(on: bool) -> void:
+		_pref_train_chains = on
+		_save_prefs()
+		_apply_training())
+
+	var done := _make_primary_button("Done", func() -> void:
+		_training_scroll = null
+		_training_box = null
+		_clear_overlay("_training_card"))
+	done.custom_minimum_size = Vector2(0, 46)
+	box.add_child(done)
+	done.call_deferred("grab_focus")
+
+	_training_card = veil
+	add_child(_training_card)
+	_fade_in(_training_card)
+	_arm_layout()
+
+
+func _training_cell(grid: GridContainer) -> VBoxContainer:
+	var cell := VBoxContainer.new()
+	cell.add_theme_constant_override("separation", 2)
+	grid.add_child(cell)
+	return cell
+
+
+func _fit_training() -> bool:
+	## Same as _fit_setup: a ScrollContainer has no minimum height of its own,
+	## so it is given its content's, capped at what the screen has.
+	if _training_scroll == null or _training_box == null:
+		return false
+	var wanted: Vector2 = _training_box.get_combined_minimum_size()
+	var room: float = maxf(size.y - 96.0, 160.0)
+	# When it does scroll, the bar takes room of its own rather than lying
+	# over the ends of the sentences.
+	var bar: float = 16.0 if wanted.y > room else 0.0
+	var target := Vector2(wanted.x + bar, minf(wanted.y, room))
+	if _training_scroll.custom_minimum_size.is_equal_approx(target):
+		return false
+	_training_scroll.custom_minimum_size = target
+	return true
+
+
+func _training_switch(text: String, on: bool) -> CheckButton:
+	var c := CheckButton.new()
+	c.text = text
+	c.button_pressed = on
+	c.add_theme_font_size_override("font_size", 18)
+	c.custom_minimum_size = Vector2(0, 40)
+	return c
 
 
 # ----------------------------------------------------------------- end card

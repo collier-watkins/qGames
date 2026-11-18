@@ -1,10 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="312" height="356" viewBox="0 0 78 89">
-  <!-- generated from src/pieces.gd by 'make chess-pieces-repo' — delete this line once you have edited this file -->
-  <path d="M 35.00 2.00 L 43.00 2.00 L 43.00 8.00 L 50.00 8.00 L 50.00 14.00 L 43.00 14.00 L 43.00 21.00 L 35.00 21.00 L 35.00 14.00 L 28.00 14.00 L 28.00 8.00 L 35.00 8.00 Z" fill="#f4f4f2" stroke="#1f2126" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 4.00 40.00 C 3.00 26.00 15.00 16.00 27.00 16.00 C 34.00 16.00 36.00 21.00 39.00 21.00 C 42.00 21.00 44.00 16.00 51.00 16.00 C 63.00 16.00 75.00 26.00 74.00 40.00 Z" fill="#f4f4f2" stroke="#1f2126" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 19.00 40.00 L 59.00 40.00 C 62.00 50.00 66.00 61.00 68.00 70.00 L 10.00 70.00 C 12.00 61.00 16.00 50.00 19.00 40.00 Z" fill="#f4f4f2" stroke="#1f2126" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 15.00 70.00 L 63.00 70.00 C 63.00 74.00 66.00 77.00 71.00 79.00 C 74.00 81.00 75.00 84.00 75.00 88.00 L 3.00 88.00 C 3.00 84.00 4.00 81.00 7.00 79.00 C 12.00 77.00 15.00 74.00 15.00 70.00 Z" fill="#f4f4f2" stroke="#1f2126" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 25.00 20.00 C 13.00 20.00 13.00 36.00 25.00 36.00 C 35.00 36.00 43.00 20.00 53.00 20.00 C 65.00 20.00 65.00 36.00 53.00 36.00 C 43.00 36.00 35.00 20.00 25.00 20.00" fill="none" stroke="#1f2126" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 17.00 51.00 C 28.00 48.00 50.00 48.00 61.00 51.00" fill="none" stroke="#1f2126" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 14.00 60.00 C 27.00 57.00 51.00 57.00 64.00 60.00" fill="none" stroke="#1f2126" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="45" height="45">
+<!-- Chess piece by Colin M.L. Burnett (Cburnett), 2006, from Wikimedia Commons
+     (commons.wikimedia.org/wiki/Category:SVG_chess_pieces). Used under the 3-clause BSD license:
+     see LICENSE.txt beside this file. -->
+  <g fill="none" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+    <path stroke-linejoin="miter" d="M22.5 11.63V6M20 8h5"/>
+    <path fill="#fff" stroke-linecap="butt" stroke-linejoin="miter" d="M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5"/>
+    <path fill="#fff" d="M12.5 37c5.5 3.5 14.5 3.5 20 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-2.5-7.5-12-10.5-16-4-3 6 6 10.5 6 10.5v7"/>
+    <path d="M12.5 30c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0m-20 3.5c5.5-3 14.5-3 20 0"/>
+  </g>
 </svg>

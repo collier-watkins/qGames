@@ -24,6 +24,9 @@ var _frame := 0
 var _steps: Array = []
 var _step := 0
 var _wait_until_ms := 0
+## The player's own training prefs, put back when the run ends: it writes the
+## real user://config.cfg.
+var _saved_training: Array = []
 
 
 func _initialize() -> void:
@@ -53,6 +56,16 @@ func _initialize() -> void:
 		_stage_sound,
 		_stage_review,
 		_stage_live,
+		_stage_training_open,
+		_stage_training_on,
+		_stage_training_done,
+		_stage_training_board,
+		_stage_training_hover,
+		_stage_point_computer,
+		_stage_point_mine,
+		_stage_point_chain,
+		_stage_point_done,
+		_stage_training_off,
 		_stage_promotion_setup,
 		_stage_promotion_shown,
 		_stage_promotion_done,
@@ -271,6 +284,177 @@ func _stage_live() -> bool:
 	_find_button(_view, "Back to the game").pressed.emit()
 	_wait(150)
 	_ck_true("going live re-enables the board", bool(_board.get("interactive")))
+	return false
+
+
+func _stage_training_open() -> bool:
+	# By field, not by text: the label reads "Training: on" when the saved
+	# prefs from a real game already have it switched on.
+	_saved_training = [_view.get("_pref_training"), _view.get("_pref_train_danger"),
+			_view.get("_pref_train_attack"), _view.get("_pref_train_hover"),
+			_view.get("_pref_train_chains")]
+	var button: Button = _view.get("_btn_training")
+	_ck_true("training mode is reachable from the panel", button != null)
+	_click(button.get_global_transform() * (button.size * 0.5))
+	_wait(250)
+	return false
+
+
+func _stage_training_on() -> bool:
+	_ck_true("the training card opens", _view.get("_training_card") != null)
+	var master: Button = _find_button(_view, "Training mode")
+	var danger: Button = _find_button(_view, "Danger squares")
+	var attack: Button = _find_button(_view, "Attack squares")
+	var hover: Button = _find_button(_view, "Only the piece I point at")
+	_ck_true("...and the point-at-a-piece switch", hover != null)
+	_ck_true("...with a master switch and the danger- and attack-squares switches",
+			master != null and danger != null and attack != null)
+	# Start from off whatever the saved prefs say, so the disabled state is
+	# actually exercised.
+	master.button_pressed = false
+	_ck_true("an aid cannot be switched while training is off", danger.disabled)
+	master.button_pressed = true
+	danger.button_pressed = true
+	attack.button_pressed = true
+	# The whole-board maps first; pointing at a piece is the next stage.
+	hover.button_pressed = false
+	_ck_true("switching training on enables its aids", not danger.disabled)
+	_shot("06a_training_card")
+	# The card scrolls when it is taller than the screen; bring Done into view
+	# the way a person would before pressing it. Lands next frame.
+	var scroll: ScrollContainer = _view.get("_training_scroll")
+	if scroll != null:
+		scroll.ensure_control_visible(_find_button(_view, "Done"))
+	_wait(150)
+	return false
+
+
+func _stage_training_done() -> bool:
+	var done: Button = _find_button(_view, "Done")
+	_click(done.get_global_transform() * (done.size * 0.5))
+	_wait(200)
+	return false
+
+
+func _stage_training_board() -> bool:
+	## A set position: the knights on e4 (a light square) and g5 (dark) are
+	## attacked by the d5 and h6 pawns, and the bishop's a3 is covered by b4.
+	## Every pawn's and the king's empty take squares are shaded as well.
+	_ck_true("Done closes the card", _view.get("_training_card") == null)
+	var game = _view.get("_game")
+	_ck("the board watches the human's pieces", _board.get("danger_for"), game.human_side)
+	game.board = ChessBoard.new("4k3/8/7p/3p2N1/1p2N3/8/8/2B1K3 w - - 0 1")
+	_board.call("show_position", game.board)
+	var danger: Array = []
+	for s in _board.get("_danger"):
+		danger.append(ChessBoard.square_name(s))
+	danger.sort()
+	_ck("the take squares are shaded: knights on light and dark, empty squares too",
+			danger, ["a3", "c3", "c4", "d7", "d8", "e4", "e7", "f8", "g5"])
+	_ck_true("...but not f7: the king cannot take there, the g5 knight protects it",
+			not danger.has("f7"))
+	var attack: Array = []
+	for s in _board.get("_attack"):
+		attack.append(ChessBoard.square_name(s))
+	_ck_true("attack squares are shaded: the knights' and the bishop's take squares",
+			attack.has("d6") and attack.has("h7") and attack.has("f4") and not attack.has("d5"))
+	_ck_true("...and e4, which both sides can take on, is in both — drawn split",
+			attack.has("e4") and danger.has("e4"))
+	_click(_square_pos("c1"))
+	_wait(200)
+	return false
+
+
+func _stage_training_hover() -> bool:
+	_ck("selecting the bishop marks the one move that hangs it", _board.get("_hanging"),
+			PackedInt32Array([ChessBoard.square_from_name("a3")]))
+	_shot("06b_training_board")
+	_board.call("clear_selection")
+	_view.set("_pref_train_hover", true)
+	_view.call("_apply_training")
+	_board.set("show_cursor", false)
+	_hover(Vector2(-50, -50))
+	_ck("pointing at nothing shows nothing", (_board.get("_danger") as PackedInt32Array).size()
+			+ (_board.get("_attack") as PackedInt32Array).size(), 0)
+	_hover(_square_pos("d5"))
+	_wait(150)
+	return false
+
+
+func _stage_point_computer() -> bool:
+	_ck("pointing at the computer's d5 pawn shows ITS take squares, red",
+			_names(_board.get("_danger")), ["c4", "e4"])
+	_ck("...and no blue", (_board.get("_attack") as PackedInt32Array).size(), 0)
+	_shot("06c_point_computer")
+	_hover(_square_pos("g5"))
+	_wait(150)
+	return false
+
+
+func _stage_point_mine() -> bool:
+	var blue: Array = _names(_board.get("_attack"))
+	_ck_true("pointing at my g5 knight shows its take squares, blue",
+			blue.has("h7") and blue.has("f7") and blue.has("e6") and not blue.has("d5"))
+	_ck("...and no red", (_board.get("_danger") as PackedInt32Array).size(), 0)
+	_shot("06d_point_mine")
+	var badged: Array = []
+	for s: int in (_board.get("_in_danger") as Dictionary):
+		badged.append(ChessBoard.square_name(s))
+	badged.sort()
+	_ck("both knights carry a danger badge: each is attacked by a pawn", badged, ["e4", "g5"])
+	_hover(_square_pos("e4"))
+	_wait(150)
+	return false
+
+
+func _stage_point_chain() -> bool:
+	var chain: Dictionary = _board.get("_chain")
+	_ck("pointing at the e4 knight shows its take chain: two steps",
+			(chain.get("steps", []) as Array).size(), 2)
+	_ck("...worth a knight for a pawn to them", int(chain.get("worth", 0)), 2)
+	var explain: Label = _view.get("_explain")
+	_ck_true("...and the panel says it in words", explain.visible and explain.text.contains("pawn"))
+	print("      panel: ", explain.text)
+	_shot("06e_take_chain")
+	_hover(Vector2(-50, -50))
+	_wait(120)
+	return false
+
+
+func _stage_point_done() -> bool:
+	_ck("moving off the board clears it", (_board.get("_attack") as PackedInt32Array).size(), 0)
+	return false
+
+
+func _hover(pos: Vector2) -> void:
+	var e := InputEventMouseMotion.new()
+	e.position = get_root().get_screen_transform() * pos
+	e.global_position = e.position
+	Input.parse_input_event(e)
+	Input.flush_buffered_events()
+
+
+func _names(squares: PackedInt32Array) -> Array:
+	var out: Array = []
+	for s in squares:
+		out.append(ChessBoard.square_name(s))
+	out.sort()
+	return out
+
+
+func _stage_training_off() -> bool:
+	_view.set("_pref_training", false)
+	_view.call("_apply_training")
+	_ck("switching training off clears the shading", (_board.get("_danger") as PackedInt32Array).size(), 0)
+	# Put the player's own setting back: the run writes the real config.
+	_view.set("_pref_training", _saved_training[0])
+	_view.set("_pref_train_danger", _saved_training[1])
+	_view.set("_pref_train_attack", _saved_training[2])
+	_view.set("_pref_train_hover", _saved_training[3])
+	_view.set("_pref_train_chains", _saved_training[4])
+	_view.call("_save_prefs")
+	_board.call("clear_selection")
+	_wait(120)
 	return false
 
 

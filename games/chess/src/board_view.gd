@@ -14,6 +14,9 @@ extends Control
 
 signal move_attempted(from_sq: int, to_sq: int)
 signal square_touched(sq: int)
+## Training mode's take chain, in words, for the piece being pointed at — or ""
+## when there is none. The panel shows it; the board only has room for arrows.
+signal chain_explained(text: String)
 
 const B := preload("res://src/board.gd")
 
@@ -26,6 +29,20 @@ const C_DARK_SELECT: Color = Color(0.8039, 0.8353, 0.3059)
 const C_DOT: Color = Color(0.1216, 0.1216, 0.1216, 0.28)
 const C_CHECK: Color = Color(0.8627, 0.2118, 0.1608)
 const C_CURSOR: Color = Color(1.0, 0.8471, 0.3216)
+## Training mode's danger squares. Washed over the square so its own colour
+## still shows through: "a little bit red", not a second check glow. Stronger
+## on the dark squares because red over green mixes to brown — at the light
+## squares' 0.34 a dark square read as olive, not red (swatch-checked).
+const C_DANGER: Color = Color(0.8627, 0.1490, 0.1490)
+const DANGER_ALPHA_LIGHT: float = 0.34
+const DANGER_ALPHA_DARK: float = 0.50
+## Training mode's attack squares: where the watched side could take. Same
+## reasoning for the split alphas — blue over green reads teal below ~0.56.
+## A square that is both is split on the diagonal, half red and half blue: the
+## two washes stacked mix to a muddy purple that reads as neither.
+const C_ATTACK: Color = Color(0.13, 0.40, 0.92)
+const ATTACK_ALPHA_LIGHT: float = 0.38
+const ATTACK_ALPHA_DARK: float = 0.56
 const C_HINT: Color = Color(0.2000, 0.6000, 0.9412, 0.85)
 const C_COORD_ON_LIGHT: Color = Color(0.4627, 0.5882, 0.3373)
 const C_COORD_ON_DARK: Color = Color(0.9255, 0.8863, 0.8118)
@@ -73,6 +90,37 @@ var hint_to: int = -1
 
 var selected: int = -1
 var targets: PackedInt32Array = PackedInt32Array()
+
+## Training mode, danger squares: the side whose pieces are watched, or 0 for
+## off. `_danger` holds the squares where the opponent could take one of that
+## side's pieces — empty or not (ChessBoard.danger_squares).
+var danger_for: int = 0
+var _danger: PackedInt32Array = PackedInt32Array()
+## Training mode, attack squares: the side whose take squares are shown, or 0.
+## `_attack` holds the squares where that side could take an enemy piece —
+## the same question as `_danger`, asked the other way round.
+var attack_for: int = 0
+var _attack: PackedInt32Array = PackedInt32Array()
+## The piece being looked at: under the mouse, under the keyboard cursor, or
+## last tapped (touch has no hover). While it is set, the maps narrow to that
+## ONE piece — the computer's piece shows its red take squares, the player's
+## its blue ones — which is what teaches "this piece guards these squares".
+## `hover_only` false shows the whole board's maps when nothing is pointed at.
+var hover_only: bool = true
+var _inspect: int = -1
+## The selected piece's destinations where it could be taken straight back.
+## All of these are recomputed when the position, the pointed-at piece or the
+## selection changes, never per frame.
+var _hanging: PackedInt32Array = PackedInt32Array()
+## Training mode, take chains: the player's side, or 0 for off. `_in_danger` is
+## the player's pieces that can be taken without the taker losing on it,
+## square -> worth (ChessBoard.pieces_in_danger): badged "!" all the time.
+## `_chain` is the pointed-at piece's capture sequence (ChessBoard.take_chain),
+## drawn as numbered arrows.
+var chains_for: int = 0
+var _in_danger: Dictionary = {}
+var _chain: Dictionary = {}
+var _chain_text: String = ""
 var cursor: int = 4
 var show_cursor: bool = false
 
@@ -120,13 +168,130 @@ func show_position(b: ChessBoard, from_sq: int = -1, to_sq: int = -1) -> void:
 	_fades.clear()
 	_pops.clear()
 	clear_selection()
+	_refresh_maps()
 	set_process(true)
 	queue_redraw()
+
+
+func set_training(danger_side: int, attack_side: int, only_pointed: bool,
+		chains_side: int = 0) -> void:
+	danger_for = danger_side
+	attack_for = attack_side
+	hover_only = only_pointed
+	chains_for = chains_side
+	_refresh_maps()
+	_refresh_hanging()
+	queue_redraw()
+
+
+func set_inspect(sq: int) -> void:
+	## Only a square with a piece on it is worth looking at; anything else
+	## clears it. Unchanged → nothing is recomputed, so a mouse wandering
+	## around inside one square costs nothing.
+	if sq >= 0 and (board == null or board.board[sq] == 0):
+		sq = -1
+	if sq == _inspect:
+		return
+	_inspect = sq
+	_refresh_maps(false)
+	queue_redraw()
+
+
+func _refresh_maps(position_changed: bool = true) -> void:
+	_danger = PackedInt32Array()
+	_attack = PackedInt32Array()
+	if position_changed:
+		_in_danger = {}
+		if board != null and chains_for != 0:
+			_in_danger = board.pieces_in_danger(chains_for)
+	_refresh_chain()
+	if board == null:
+		return
+	var p: int = board.board[_inspect] if _inspect >= 0 else 0
+	if p != 0:
+		var colour: int = 1 if p > 0 else -1
+		if danger_for != 0 and colour == -danger_for:
+			_danger = board.danger_squares(danger_for, _inspect)
+		if attack_for != 0 and colour == attack_for:
+			_attack = board.danger_squares(-attack_for, _inspect)
+		return
+	if hover_only:
+		return
+	if danger_for != 0:
+		_danger = board.danger_squares(danger_for)
+	if attack_for != 0:
+		_attack = board.danger_squares(-attack_for)
+
+
+func _refresh_chain() -> void:
+	_chain = {}
+	if board != null and chains_for != 0 and _inspect >= 0 and board.board[_inspect] != 0:
+		_chain = board.take_chain(_inspect)
+	var text: String = explain_chain(board, _inspect, _chain, chains_for)
+	if text != _chain_text:
+		_chain_text = text
+		chain_explained.emit(text)
+
+
+const PIECE_NAMES: Array[String] = ["", "pawn", "knight", "bishop", "rook", "queen", "king"]
+
+
+static func explain_chain(b: ChessBoard, sq: int, chain: Dictionary, me: int) -> String:
+	## The chain in a sentence a child can be read: whose piece, who takes with
+	## what in order, and how it ends. Only the steps worth playing are told —
+	## the faded ones on the board are the "and then nobody would" part.
+	if b == null or chain.is_empty() or sq < 0:
+		return ""
+	var target: int = b.board[sq]
+	var mine: bool = (target > 0) == (me > 0)
+	var owner: String = "Your " if mine else "Their "
+	var what: String = PIECE_NAMES[absi(target)]
+	var worth: int = int(chain["worth"])
+	var played: int = int(chain["played"])
+	var steps: Array = chain["steps"]
+	if played == 0:
+		# Taking it at all loses the first taker material.
+		var who: String = "them" if mine else "you"
+		return "%s%s is protected: taking it would cost %s %s." % [
+				owner, what, who, _points(-worth)]
+	var parts: PackedStringArray = PackedStringArray()
+	for i in played:
+		var piece: int = int(steps[i]["piece"])
+		var by_me: bool = (piece > 0) == (me > 0)
+		var verb: String = "take" if i == 0 else "take back"
+		parts.append("%s %s with %s %s" % ["you" if by_me else "they", verb,
+				"your" if by_me else "their", PIECE_NAMES[absi(piece)]])
+	var first_mine: bool = (int(steps[0]["piece"]) > 0) == (me > 0)
+	var ending: String
+	if worth == 0:
+		ending = "An even trade."
+	elif first_mine:
+		ending = "You win %s." % _points(worth)
+	else:
+		ending = "You lose %s." % _points(worth)
+	return "%s%s: %s. %s" % [owner, what, ", then ".join(parts), ending]
+
+
+static func _points(n: int) -> String:
+	return "%d point" % n if n == 1 else "%d points" % n
+
+
+func _refresh_hanging() -> void:
+	_hanging = PackedInt32Array()
+	if board == null or danger_for == 0:
+		return
+	if selected >= 0 and board.side == danger_for:
+		for m in board.legal_moves_from(selected):
+			var to: int = B.move_to(m)
+			# Promotions repeat the destination four times; one answer will do.
+			if not _hanging.has(to) and board.move_hangs(m):
+				_hanging.append(to)
 
 
 func clear_selection() -> void:
 	selected = -1
 	targets = PackedInt32Array()
+	_hanging = PackedInt32Array()
 	_dragging = false
 	_drag_from = -1
 	set_process(true)
@@ -147,6 +312,7 @@ func select(sq: int) -> void:
 		var to: int = B.move_to(m)
 		if not targets.has(to):
 			targets.append(to)
+	_refresh_hanging()
 	set_process(true)
 	queue_redraw()
 
@@ -308,8 +474,20 @@ func square_at(pos: Vector2) -> int:
 
 # ------------------------------------------------------------------- input
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_MOUSE_EXIT and _press_sq < 0:
+		set_inspect(-1)
+
+
 func _gui_input(event: InputEvent) -> void:
-	if not interactive or board == null:
+	if board == null:
+		return
+	# Pointing at a piece works even when the board is read-only — looking at a
+	# finished game is exactly when "what did that piece guard?" gets asked.
+	# Not during a press: the piece being dragged stays the one looked at.
+	if event is InputEventMouseMotion and _press_sq < 0:
+		set_inspect(square_at(event.position))
+	if not interactive:
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -350,6 +528,9 @@ func _begin_press(pos: Vector2) -> void:
 	_press_pos = pos
 	_drag_pos = pos
 	grab_focus()
+	# Touch has no hover, so a tap is how a piece gets looked at — either
+	# colour, including the computer's, which cannot be selected.
+	set_inspect(sq)
 
 	# Pressing a legal destination completes the move that is already begun.
 	if selected >= 0 and targets.has(sq):
@@ -419,6 +600,7 @@ func _key_input(event: InputEvent) -> void:
 	var rank: int = clampi(B.rank_of(cursor) + delta.y, 0, 7)
 	cursor = B.square_of(file, rank)
 	show_cursor = true
+	set_inspect(cursor)
 	accept_event()
 	queue_redraw()
 
@@ -461,6 +643,31 @@ func _draw() -> void:
 			if show_coords:
 				_draw_coords(font, coord_size, file, rank, r, light)
 
+	# Training mode: squares where a piece would be taken. A flat wash over the square,
+	# under the pieces, drawn before the check glow and the selection so both
+	# still read on top of it.
+	# Attack squares the same way, in blue; a square that is both is split.
+	for sq in _danger:
+		var light_d: bool = (B.file_of(sq) + B.rank_of(sq)) % 2 == 1
+		var red := Color(C_DANGER, DANGER_ALPHA_LIGHT if light_d else DANGER_ALPHA_DARK)
+		var rd: Rect2 = square_rect(sq)
+		if _attack.has(sq):
+			var blue := Color(C_ATTACK, ATTACK_ALPHA_LIGHT if light_d else ATTACK_ALPHA_DARK)
+			var tl: Vector2 = rd.position
+			var br: Vector2 = rd.end
+			var tr := Vector2(br.x, tl.y)
+			var bl := Vector2(tl.x, br.y)
+			draw_colored_polygon(PackedVector2Array([tl, tr, bl]), red)
+			draw_colored_polygon(PackedVector2Array([tr, br, bl]), blue)
+		else:
+			draw_rect(rd, red)
+	for sq in _attack:
+		if _danger.has(sq):
+			continue
+		var light_a: bool = (B.file_of(sq) + B.rank_of(sq)) % 2 == 1
+		draw_rect(square_rect(sq), Color(C_ATTACK,
+				ATTACK_ALPHA_LIGHT if light_a else ATTACK_ALPHA_DARK))
+
 	# The king in check, under the pieces so the piece is never obscured. The
 	# glow breathes rather than sitting still: a static red square is read once
 	# and then stops being noticed.
@@ -481,6 +688,10 @@ func _draw() -> void:
 	for sq in targets:
 		var r2: Rect2 = square_rect(sq)
 		var dot: Color = Color(C_DOT, C_DOT.a * _select_t)
+		if _hanging.has(sq):
+			# A move that leaves the piece where it can be taken: the same red
+			# as the danger squares, so it reads as "this would be one".
+			dot = Color(C_DANGER, 0.62 * _select_t)
 		if board.board[sq] != 0 or (sq == board.ep and absi(board.board[selected]) == B.PAWN):
 			# A capture is a ring around the square, not a dot in the middle,
 			# so the piece being taken stays visible.
@@ -522,6 +733,9 @@ func _draw() -> void:
 
 	if hint_from >= 0 and hint_to >= 0:
 		_draw_arrow(square_rect(hint_from).get_center(), square_rect(hint_to).get_center())
+
+	_draw_danger_badges()
+	_draw_chain()
 
 	if show_cursor:
 		var cr: Rect2 = square_rect(cursor)
@@ -590,6 +804,119 @@ func _draw_piece_at(p: int, r: Rect2, alpha: float = 1.0) -> void:
 		fill.a = alpha
 		edge.a = alpha
 	art.draw(self, p, r.grow(-r.size.x * 0.06), fill, edge)
+
+
+## Take-chain colours: the player's captures blue, the computer's red, both
+## strong enough to read over a tinted square. Steps past where a sensible
+## player stops are drawn at CHAIN_FADED.
+const C_CHAIN_MINE: Color = Color(0.11, 0.36, 0.86, 0.90)
+const C_CHAIN_THEIRS: Color = Color(0.80, 0.12, 0.12, 0.90)
+const CHAIN_FADED: float = 0.28
+const C_BADGE_LOSE: Color = Color(0.84, 0.13, 0.13)
+const C_BADGE_EVEN: Color = Color(0.93, 0.62, 0.10)
+const C_VERDICT_GOOD: Color = Color(0.13, 0.55, 0.25)
+
+
+func _draw_danger_badges() -> void:
+	## A "!" in the top-right corner of each of the player's pieces that can be
+	## taken: red when the taker comes out ahead, amber for an even trade. In
+	## the corner so the piece itself stays readable.
+	var font: Font = ThemeDB.fallback_font
+	var radius: float = _square * 0.15
+	var fs: int = int(maxf(9.0, _square * 0.24))
+	for sq: int in _in_danger:
+		if _slides.size() > 0:
+			break
+		var r: Rect2 = square_rect(sq)
+		var c: Vector2 = r.position + Vector2(r.size.x - radius * 1.15, radius * 1.15)
+		var colour: Color = C_BADGE_LOSE if int(_in_danger[sq]) > 0 else C_BADGE_EVEN
+		draw_circle(c, radius, colour)
+		draw_arc(c, radius, 0.0, TAU, 24, Color(1, 1, 1, 0.9), maxf(1.0, _square * 0.02), true)
+		draw_string(font, c + Vector2(-radius, fs * 0.36), "!", HORIZONTAL_ALIGNMENT_CENTER,
+				radius * 2.0, fs, Color.WHITE)
+
+
+func _draw_chain() -> void:
+	## The pointed-at piece's take chain: an arrow from each taker to the
+	## square, a numbered disc on the taker giving the order, and the verdict
+	## in a pill beside the square.
+	if _chain.is_empty() or _inspect < 0 or not _slides.is_empty():
+		return
+	var steps: Array = _chain["steps"]
+	var played: int = int(_chain["played"])
+	var target: Vector2 = square_rect(_inspect).get_center()
+	var font: Font = ThemeDB.fallback_font
+	# Faded first so the steps that happen are drawn over them.
+	for pass_faded: bool in [true, false]:
+		for i in steps.size():
+			if (i >= played) != pass_faded:
+				continue
+			var from_sq: int = int(steps[i]["from"])
+			var mine: bool = (int(steps[i]["piece"]) > 0) == (chains_for > 0)
+			var colour: Color = C_CHAIN_MINE if mine else C_CHAIN_THEIRS
+			if pass_faded:
+				colour.a = CHAIN_FADED
+			var from_pt: Vector2 = square_rect(from_sq).get_center()
+			_draw_arrow_coloured(from_pt, target, colour, 0.08)
+			var dr: Rect2 = square_rect(from_sq)
+			var disc: Vector2 = dr.position + Vector2(_square * 0.19, _square * 0.19)
+			var rad: float = _square * 0.16
+			draw_circle(disc, rad, colour)
+			var fs: int = int(maxf(9.0, _square * 0.22))
+			draw_string(font, disc + Vector2(-rad, fs * 0.36), str(i + 1),
+					HORIZONTAL_ALIGNMENT_CENTER, rad * 2.0, fs, Color(1, 1, 1, colour.a))
+	_draw_verdict()
+
+
+func _draw_verdict() -> void:
+	var target_piece: int = board.board[_inspect]
+	var mine: bool = (target_piece > 0) == (chains_for > 0)
+	var worth: int = int(_chain["worth"])
+	var played: int = int(_chain["played"])
+	var first_mine: bool = (int(_chain["steps"][0]["piece"]) > 0) == (chains_for > 0)
+	var text: String
+	var colour: Color
+	if played == 0:
+		text = "safe" if mine else "protected"
+		colour = C_VERDICT_GOOD if mine else C_BADGE_EVEN
+	elif worth == 0:
+		text = "even trade"
+		colour = C_BADGE_EVEN
+	elif first_mine:
+		text = "win %d" % worth
+		colour = C_VERDICT_GOOD
+	else:
+		text = "lose %d" % worth
+		colour = C_BADGE_LOSE
+	var font: Font = ThemeDB.fallback_font
+	var fs: int = int(maxf(10.0, _square * 0.22))
+	var w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + fs * 0.9
+	var h: float = fs * 1.5
+	var r: Rect2 = square_rect(_inspect)
+	# Above the square, or below it on the top row; kept inside the board.
+	var y: float = r.position.y - h - _square * 0.04
+	if y < _origin.y:
+		y = r.end.y + _square * 0.04
+	var x: float = clampf(r.get_center().x - w * 0.5, _origin.x, _origin.x + _square * 8.0 - w)
+	var pill := Rect2(Vector2(x, y), Vector2(w, h))
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = colour
+	sb.set_corner_radius_all(int(h * 0.5))
+	draw_style_box(sb, pill)
+	draw_string(font, Vector2(x, y + h * 0.5 + fs * 0.36), text, HORIZONTAL_ALIGNMENT_CENTER,
+			w, fs, Color.WHITE)
+
+
+func _draw_arrow_coloured(from: Vector2, to: Vector2, colour: Color, width: float) -> void:
+	## A slimmer arrow than the hint's, stopping short of the target's centre
+	## so several converging on one square do not bury the piece.
+	var dir: Vector2 = (to - from).normalized()
+	var head: float = _square * 0.24
+	var tip: Vector2 = to - dir * (_square * 0.30)
+	var shaft_end: Vector2 = tip - dir * head
+	draw_line(from + dir * (_square * 0.20), shaft_end, colour, _square * width, true)
+	var perp: Vector2 = Vector2(-dir.y, dir.x) * head * 0.55
+	draw_colored_polygon(PackedVector2Array([tip, shaft_end + perp, shaft_end - perp]), colour)
 
 
 func _draw_arrow(from: Vector2, to: Vector2) -> void:

@@ -299,6 +299,201 @@ func is_attacked(sq: int, by: int) -> bool:
 	return false
 
 
+func capturable(victim: int, from_sq: int = -1) -> PackedInt32Array:
+	## Squares holding a piece of side `victim` that the other side has a
+	## LEGAL capture onto, asked as if it were the other side's move. Kings are
+	## left out: a king that can be taken is check, which has its own signal.
+	##
+	## Legal rather than merely attacked, because the answer is shown to a
+	## child as "this can be taken": a piece pinned to its own king attacks the
+	## square and still cannot take on it, and is_attacked() cannot see that.
+	## En passant counts — the pawn it takes is not on the destination square.
+	var saved_side: int = side
+	var saved_ep: int = ep
+	if side == victim:
+		# The en-passant square belongs to the side to move; once the turn is
+		# handed over it would let the wrong side capture.
+		side = -victim
+		ep = -1
+	var out: PackedInt32Array = PackedInt32Array()
+	for m in legal_moves():
+		if from_sq >= 0 and move_from(m) != from_sq:
+			continue
+		var sq: int = move_to(m)
+		if move_flag(m) == FLAG_EP:
+			sq -= 16 * side
+		var p: int = board[sq]
+		if p != 0 and (p > 0) == (victim > 0) and absi(p) != KING and not out.has(sq):
+			out.append(sq)
+	side = saved_side
+	ep = saved_ep
+	return out
+
+
+func danger_squares(victim: int, from_sq: int = -1) -> PackedInt32Array:
+	## Every square where a piece of side `victim` would be taken: the other
+	## side's "take squares". Empty squares count — that is the point, a child
+	## sees where NOT to go — and so do the other side's own pieces when they
+	## are protected, because taking one there gets the taker taken back.
+	##
+	## Legal, not merely attacked. Each square is asked with a stand-in piece of
+	## `victim` placed on it: a pinned attacker cannot take, and a king cannot
+	## take on a square `victim` protects. The kings' own squares are left out
+	## (check has its own glow; the other king can never be taken).
+	##
+	## `from_sq` narrows it to one piece's take squares — the piece a player is
+	## pointing at. Its own square is never one of them.
+	var by: int = -victim
+	var saved_side: int = side
+	var saved_ep: int = ep
+	side = by
+	ep = -1
+	var out: PackedInt32Array = PackedInt32Array()
+	for t in 128:
+		if t & 0x88:
+			continue
+		var held: int = board[t]
+		if absi(held) == KING or t == from_sq:
+			continue
+		# A cheap ray scan rules out most of the board before any move is made.
+		if not is_attacked(t, by):
+			continue
+		board[t] = PAWN * victim
+		for m in pseudo_moves(true, from_sq):
+			if move_to(m) != t:
+				continue
+			_make(m)
+			var exposes_king: bool = is_attacked(king_sq[0 if by == WHITE else 1], victim)
+			_unmake()
+			if not exposes_king:
+				out.append(t)
+				break
+		board[t] = held
+	side = saved_side
+	ep = saved_ep
+	# En passant: the pawn taken is not on the square the taker lands on, so the
+	# stand-in test cannot see it. capturable() asks the real position.
+	for sq in capturable(victim, from_sq):
+		if not out.has(sq):
+			out.append(sq)
+	return out
+
+
+## Exchange values in pawns, the ones taught to children. The king's is only
+## there so it is always the LAST piece to join a chain.
+const TRADE_VALUE: Array[int] = [0, 1, 3, 3, 5, 9, 100]
+
+
+func take_chain(sq: int) -> Dictionary:
+	## The capture sequence on `sq` if the piece standing there is taken: each
+	## side recaptures with its least valuable piece that can LEGALLY take, in
+	## turn, until one side runs out. Played out on the board with make/unmake,
+	## so pins, a king that cannot take into protection, and pieces lined up
+	## behind the first taker (x-rays: a queen behind a rook) all come out right
+	## without being special-cased.
+	##
+	## Returns {} when nothing can take, else:
+	##   steps:  Array of {from: int, piece: int} — piece is signed, so its sign
+	##           says whose capture it is.
+	##   worth:  what the FIRST taker gains if both sides then play the chain
+	##           only as far as it pays them (> 0: winning, 0: even, < 0: losing).
+	##   played: how many steps that is; steps after it are ones a sensible
+	##           player would not make.
+	var p: int = board[sq]
+	if p == 0 or absi(p) == KING:
+		return {}
+	var saved_side: int = side
+	var saved_ep: int = ep
+	side = -1 if p > 0 else 1
+	ep = -1
+	var steps: Array = []
+	var gains: Array[int] = []
+	var standing: int = TRADE_VALUE[absi(p)]
+	while steps.size() < 32:
+		var best: int = 0
+		var best_value: int = 1 << 20
+		for m in pseudo_moves(true):
+			if move_to(m) != sq:
+				continue
+			# A pawn taking onto the last rank comes four ways; the queen is
+			# the one anybody plays.
+			if move_promo(m) != 0 and move_promo(m) != QUEEN:
+				continue
+			var value: int = TRADE_VALUE[absi(board[move_from(m)])]
+			if value >= best_value:
+				continue
+			_make(m)
+			var legal: bool = not is_attacked(king_sq[0 if -side == WHITE else 1], side)
+			_unmake()
+			if legal:
+				best = m
+				best_value = value
+		if best == 0:
+			break
+		steps.append({"from": move_from(best), "piece": board[move_from(best)]})
+		gains.append(standing)
+		standing = TRADE_VALUE[QUEEN] if move_promo(best) != 0 else best_value
+		_make(best)
+	for i in steps.size():
+		_unmake()
+	side = saved_side
+	ep = saved_ep
+	if steps.is_empty():
+		return {}
+	# Backwards: each taker gains what stands on the square, minus whatever the
+	# other side then gains by carrying on — and the other side only carries on
+	# if it pays (otherwise it just stops, which is worth 0 to it).
+	var n: int = gains.size()
+	var value_at: Array[int] = []
+	value_at.resize(n)
+	var next_value: int = 0
+	for d in range(n - 1, -1, -1):
+		value_at[d] = gains[d] - maxi(0, next_value)
+		next_value = value_at[d]
+	var played: int = n
+	for d in n:
+		if value_at[d] < 0:
+			played = d
+			break
+	return {"steps": steps, "worth": value_at[0], "played": played}
+
+
+func pieces_in_danger(owner: int) -> Dictionary:
+	## `owner`'s pieces the other side can take, square -> worth to the taker
+	## (see take_chain). > 0 is a piece that is losing material where it
+	## stands; 0 is an even trade; a protected piece the taker would lose on is
+	## left out.
+	var out: Dictionary = {}
+	for sq in 128:
+		if sq & 0x88:
+			continue
+		var p: int = board[sq]
+		if p == 0 or (p > 0) != (owner > 0) or absi(p) == KING:
+			continue
+		if not is_attacked(sq, -owner):
+			continue
+		var chain: Dictionary = take_chain(sq)
+		if not chain.is_empty() and int(chain["worth"]) >= 0:
+			out[sq] = int(chain["worth"])
+	return out
+
+
+func move_hangs(m: int) -> bool:
+	## After the side to move plays `m`, can the opponent legally take the
+	## piece that moved? A king move is never "hanging" — legal moves cannot
+	## put it where it can be taken.
+	var me: int = side
+	var to: int = move_to(m)
+	_make(m)
+	var hung: bool = false
+	# The cheap ray scan first; the full legal-capture check only for the few
+	# destinations that are attacked at all.
+	if absi(board[to]) != KING and is_attacked(to, side):
+		hung = capturable(me).has(to)
+	_unmake()
+	return hung
+
+
 func in_check(colour: int = 0) -> bool:
 	var c: int = colour if colour != 0 else side
 	var k: int = king_sq[0 if c == WHITE else 1]
@@ -307,11 +502,15 @@ func in_check(colour: int = 0) -> bool:
 
 # ---------------------------------------------------------- move generation
 
-func pseudo_moves(captures_only: bool = false) -> PackedInt32Array:
+func pseudo_moves(captures_only: bool = false, only_from: int = -1) -> PackedInt32Array:
+	## `only_from` limits generation to one square's piece — the danger map for
+	## a single pointed-at piece runs this once per board square.
 	var out: PackedInt32Array = PackedInt32Array()
 	var me: int = side
 	for sq in 128:
 		if sq & 0x88:
+			continue
+		if only_from >= 0 and sq != only_from:
 			continue
 		var p: int = board[sq]
 		if p == 0 or (p > 0) != (me > 0):
@@ -345,7 +544,7 @@ func pseudo_moves(captures_only: bool = false) -> PackedInt32Array:
 							out.append(pack(sq, t))
 						break
 					t += d
-	if not captures_only:
+	if not captures_only and only_from < 0:
 		_gen_castles(out, me)
 	return out
 

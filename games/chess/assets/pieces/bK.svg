@@ -1,10 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="312" height="356" viewBox="0 0 78 89">
-  <!-- generated from src/pieces.gd by 'make chess-pieces-repo' — delete this line once you have edited this file -->
-  <path d="M 35.00 2.00 L 43.00 2.00 L 43.00 8.00 L 50.00 8.00 L 50.00 14.00 L 43.00 14.00 L 43.00 21.00 L 35.00 21.00 L 35.00 14.00 L 28.00 14.00 L 28.00 8.00 L 35.00 8.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 4.00 40.00 C 3.00 26.00 15.00 16.00 27.00 16.00 C 34.00 16.00 36.00 21.00 39.00 21.00 C 42.00 21.00 44.00 16.00 51.00 16.00 C 63.00 16.00 75.00 26.00 74.00 40.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 19.00 40.00 L 59.00 40.00 C 62.00 50.00 66.00 61.00 68.00 70.00 L 10.00 70.00 C 12.00 61.00 16.00 50.00 19.00 40.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 15.00 70.00 L 63.00 70.00 C 63.00 74.00 66.00 77.00 71.00 79.00 C 74.00 81.00 75.00 84.00 75.00 88.00 L 3.00 88.00 C 3.00 84.00 4.00 81.00 7.00 79.00 C 12.00 77.00 15.00 74.00 15.00 70.00 Z" fill="#1f2126" stroke="#f4f4f2" stroke-width="2.2" stroke-linejoin="round"/>
-  <path d="M 25.00 20.00 C 13.00 20.00 13.00 36.00 25.00 36.00 C 35.00 36.00 43.00 20.00 53.00 20.00 C 65.00 20.00 65.00 36.00 53.00 36.00 C 43.00 36.00 35.00 20.00 25.00 20.00" fill="none" stroke="#f4f4f2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 17.00 51.00 C 28.00 48.00 50.00 48.00 61.00 51.00" fill="none" stroke="#f4f4f2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 14.00 60.00 C 27.00 57.00 51.00 57.00 64.00 60.00" fill="none" stroke="#f4f4f2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="45" height="45">
+<!-- Chess piece by Colin M.L. Burnett (Cburnett), 2006, from Wikimedia Commons
+     (commons.wikimedia.org/wiki/Category:SVG_chess_pieces). Used under the 3-clause BSD license:
+     see LICENSE.txt beside this file. -->
+  <g style="fill:none; fill-opacity:1; fill-rule:evenodd; stroke:#000000; stroke-width:1.5; stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4; stroke-dasharray:none; stroke-opacity:1;">
+    <path d="M 22.5,11.63 L 22.5,6" style="fill:none; stroke:#000000; stroke-linejoin:miter;" id="path6570"/>
+    <path d="M 22.5,25 C 22.5,25 27,17.5 25.5,14.5 C 25.5,14.5 24.5,12 22.5,12 C 20.5,12 19.5,14.5 19.5,14.5 C 18,17.5 22.5,25 22.5,25" style="fill:#000000;fill-opacity:1; stroke-linecap:butt; stroke-linejoin:miter;"/>
+    <path d="M 12.5,37 C 18,40.5 27,40.5 32.5,37 L 32.5,30 C 32.5,30 41.5,25.5 38.5,19.5 C 34.5,13 25,16 22.5,23.5 L 22.5,27 L 22.5,23.5 C 20,16 10.5,13 6.5,19.5 C 3.5,25.5 12.5,30 12.5,30 L 12.5,37" style="fill:#000000; stroke:#000000;"/>
+    <path d="M 20,8 L 25,8" style="fill:none; stroke:#000000; stroke-linejoin:miter;"/>
+    <path d="M 32,29.5 C 32,29.5 40.5,25.5 38.03,19.85 C 34.15,14 25,18 22.5,24.5 L 22.5,26.6 L 22.5,24.5 C 20,18 10.85,14 6.97,19.85 C 4.5,25.5 13,29.5 13,29.5" style="fill:none; stroke:#ffffff;"/>
+    <path d="M 12.5,30 C 18,27 27,27 32.5,30 M 12.5,33.5 C 18,30.5 27,30.5 32.5,33.5 M 12.5,37 C 18,34 27,34 32.5,37" style="fill:none; stroke:#ffffff;"/>
+  </g>
 </svg>

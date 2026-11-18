@@ -7,8 +7,9 @@ extends RefCounted
 ##   1. `user://pieces/*.svg`  — the player's own set, editable WITHOUT a
 ##      rebuild. On Linux that is
 ##      ~/.local/share/godot/app_userdata/Chess/pieces/.
-##   2. `res://assets/pieces/*.svg` — a set shipped inside the game, if one is
-##      ever added. Nothing ships there today.
+##   2. `res://assets/pieces/*.svg` — the set shipped inside the game: Colin
+##      M.L. Burnett's classic set from Wikimedia Commons, BSD-licensed (see
+##      assets/pieces/LICENSE.txt).
 ##   3. the built-in drawn set in src/pieces.gd.
 ##
 ## Resolution is PER PIECE, not per set: replacing only wN.svg gives you your
@@ -107,7 +108,10 @@ func draw(ci: CanvasItem, piece: int, rect: Rect2, fill: Color, edge: Color) -> 
 			var ts: Vector2 = tex.get_size()
 			var s: float = minf(rect.size.x / ts.x, rect.size.y / ts.y)
 			var out := Rect2(rect.position + (rect.size - ts * s) * 0.5, ts * s)
-			ci.draw_texture_rect(tex, out, false)
+			# The fill's alpha carries a capture's fade-out; a texture ignores
+			# the colours otherwise, so without this a taken piece would sit at
+			# full strength until it vanished.
+			ci.draw_texture_rect(tex, out, false, Color(1, 1, 1, fill.a))
 			return
 	ChessPieces.draw_piece(ci, absi(piece), rect, fill, edge)
 
