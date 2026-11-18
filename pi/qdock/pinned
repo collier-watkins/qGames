@@ -1,0 +1,7 @@
+# qdock pinned apps: .desktop ids, in order (restart qdock to reload: pkill -x qdock)
+qgames-paint
+qgames-chess
+qgames-sequence
+qgames-notes
+qgames-memory
+paper-map
