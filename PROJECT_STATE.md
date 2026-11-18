@@ -87,7 +87,7 @@ games/<name>/
   src/                pure model classes (RefCounted) + view nodes
   tests/run.gd        dependency-free headless SceneTree test runner
 QCORE_API.md          the frozen API contract + house rules. Read before writing a game.
-mqtt.yaml             the consuming side: Home Assistant sensors for the schema.
+homeassistant/        the consuming side: the Home Assistant config actually running.
 ```
 
 **Sharing is by symlink inside a monorepo** — one source of truth, edits land in every
@@ -130,7 +130,7 @@ for any game with no per-game templates. Game-specific topics still go
 alongside it, which is how `memory` keeps emitting its historical `moves`
 topic. Flat scalar topics, not a JSON payload: an HA MQTT sensor binds one
 topic to one state, so JSON would force a `value_template` on every sensor and
-buy nothing. `mqtt.yaml` at the repo root is the consuming side.
+buy nothing. `homeassistant/` is the consuming side.
 
 The schema lives in `QTelemetrySchema` rather than in the Telemetry autoload,
 for a non-obvious reason worth keeping: `telemetry.gd` references `QConfig`,
@@ -1183,27 +1183,34 @@ expressed. That is a no-op on backends that already honoured the setting.
 
 - Host `10.118.25.17` (eth0, TRUSTED VLAN 25) — user **`q`**, Debian 13 trixie,
   aarch64 → `arm64` builds. labwc + `wf-panel-pi`. VERIFIED.
-- Deployed with `tools/deploy.sh q@192.168.1.197` (see the routing note below);
-  all five gen2 games installed under `~/.local/share/qgames/`, launchers at
+- **Updates go over `10.118.25.17` — `make deploy`, no arguments.** `PI` now
+  defaults to the ssh alias `qpi` (`Host qpi` in `~/.ssh/config` →
+  `q@10.118.25.17`), so the target is not something to remember or mistype.
+  `make deploy GAME=paint` for one game, `make deploy PI=<user>@<host>` for
+  anywhere else. It reads the target's `uname -m` and builds only that arch, so
+  a wrong-architecture binary is not a way this can fail.
+- All five gen2 games install under `~/.local/share/qgames/`, launchers at
   `~/.local/share/applications/qgames-<id>.desktop`.
-- **Taskbar launchers live in `~/.config/wf-panel-pi/wf-panel-pi.ini`**, key
-  `launchers=` under `[panel]`, space-separated .desktop basenames without the
-  extension. Set to `qgames-chess qgames-memory qgames-notes qgames-paint
-  qgames-sequence`. Backup alongside it as `wf-panel-pi.ini.bak-<date>`.
-  There is a second, stale `~/.config/wf-panel-pi.ini` (note: no directory) that
-  the running panel does NOT read — editing that one does nothing.
-  `pkill -x wf-panel-pi` is enough to reload; `lwrespawn` restarts it.
+- **Taskbar = qdock (2026-11-18), not wf-panel-pi launchers.** See "## The Pi's dock (qdock)". wf-panel-pi still
+  runs (the system labwc autostart respawns it; no root to change that) but its `widgets_left=` is now empty, so it
+  shows only volume, clock, power. Its `launchers=` key is unused. Backups: `~/.config/wf-panel-pi/wf-panel-pi.ini.bak-20261118`
+  (the old launchers + window list) and `~/.config/labwc/autostart.bak-20261118`. There is a second, stale
+  `~/.config/wf-panel-pi.ini` (no directory) that nothing reads.
 - The gen1 games (battleship, letters, memory, paint, sequence, simon) are still
   installed there under bare `<id>.desktop` names. Left alone; they no longer
   appear on the taskbar but are still in the applications menu.
-- **GOTCHA — do not rsync to `10.118.25.17`.** The Pi is dual-homed: `eth0` on
-  TRUSTED and `wlan0` still on the LAN as `192.168.1.197`. A laptop on the LAN
-  reaches it *through* OPNsense, but the Pi replies straight out `wlan0`
-  (`ip route get 192.168.1.135` → `dev wlan0`), so pf sees one direction only,
-  cannot track the peer's window, and drops once the sender exceeds the initial
-  window. ssh, ping and `mkdir` work; a bulk transfer moved 36 KB in ten minutes
-  and hung. VERIFIED 2026-08-25. Either deploy to `192.168.1.197` (7-8 MB/s) or
-  take `wlan0` down so TRUSTED is the only path.
+- **The rsync gotcha is GONE as of 2026-08-27.** `wlan0` is down — `ip -4 addr`
+  on the Pi shows only `lo` and `eth0 10.118.25.17/24` — so TRUSTED is the only
+  path and the asymmetric-routing drop cannot happen. A full deploy to
+  `10.118.25.17` moved 336 MB at ~15 MB/s. VERIFIED.
+
+  Kept for the day `wlan0` comes back: the Pi used to be dual-homed, `eth0` on
+  TRUSTED and `wlan0` on the LAN as `192.168.1.197`. A laptop on the LAN reached
+  it *through* OPNsense while the Pi replied straight out `wlan0`, so pf saw one
+  direction only, could not track the peer's window, and dropped once the sender
+  exceeded the initial window. ssh, ping and `mkdir` worked; a bulk transfer
+  moved 36 KB in ten minutes and hung. If that returns, deploy to
+  `192.168.1.197` or take `wlan0` down again.
 
 ## The chess piece set, redrawn (2026-08-25)
 
@@ -1515,8 +1522,445 @@ that rasterises the piece SVGs at the scale and alpha the code computes for a
 series of `t`, and blits them onto a square. Animation curves can be LOOKED at
 without a display; there is no need to guess at them.
 
+## Home Assistant, rewired for gen2 (2026-08-27)
+
+Home Assistant was still consuming the gen1 suite: sensors for Battleship and
+Simon, which gen2 does not have, no sensors for Notes or Chess, which it does,
+and nothing at all for the common core (`result` / `score` / `duration_s`) that
+was the point of the 2026-08-20 schema. Sixteen qGames entities had been
+sitting `unavailable` since at least 2026-08-25.
+
+**The reason nothing was arriving was not Home Assistant.**
+`~/.config/qgames/mqtt.env` still read `MQTT_BROKER=192.168.1.4`, the pre-
+renumber address of the broker, which now answers on **10.118.20.4**.
+`tools/bake_config.sh` reads that file, so every installed build has the dead
+address inside its `.pck` — confirmed with `strings` on all five. Games
+published into a socket that never connected, and because `QMqttClient` fails
+silently by design ("a blank broker means publish nowhere"), a machine pointed
+at a *wrong* broker looks exactly like a machine pointed at no broker.
+
+Fixed on this laptop two ways: `mqtt.env` corrected so the next export bakes
+the right address, and a `[mqtt] broker="10.118.20.4"` override written into
+each installed game's `user://config.cfg`, which wins over the baked value
+without a rebuild. VERIFIED: 10.118.20.4:1883 accepts the `qgamestest`
+credentials from this laptop. NOT VERIFIED: a real round from a real game —
+that needs someone to play one. Watch `qGames/#` on the broker.
+
+**Any other machine running a baked build has the same stale address.** The Pi
+is the obvious one; it rejects our SSH key, so it was not checked. `dist/` now
+holds corrected arm64 binaries for it — `make deploy` (see the Pi section;
+this was done the same day).
+
+### Shipped, and made self-evident (2026-08-27)
+
+Re-baked and re-exported all five games for all four architectures and
+installed the x86_64 set on this laptop (694 tests green first). VERIFIED:
+`strings` shows 10.118.20.4 in every installed binary, and each one publishes
+successfully — see the self-test below. The `user://config.cfg` overrides used
+as a stopgap earlier the same day were removed, so the baked value is once
+again the single source of truth.
+
+Version strings on this build read `0.1.0+13.g2cf1dd5.dirty` because the tree
+carried uncommitted work while it was cut. Commit and re-run `make install` for
+a clean one.
+
+**`--telemetry-selftest` (new, in `Telemetry`).** The reason this defect lived
+so long is that a WRONG broker and NO broker are indistinguishable from outside
+the process: both publish nothing, silently, by design. Every build now answers
+
+    make selftest GAME=memory
+    ~/.local/share/qgames/memory/memory --headless -- --telemetry-selftest
+
+which publishes one message to `<prefix>/_selftest/<game_id>` — deliberately
+NOT a game topic, so Home Assistant never sees a round that did not happen —
+prints the endpoint it tried and the client's own counters, and exits nonzero
+if nothing left the machine. It needs no GUI, no round to finish, and no shell
+environment, so it works over ssh on the Pi, which is exactly where this will
+be needed next. `QMqttClient.endpoint_label()` was added for its log line.
+
+VERIFIED end to end: all five installed binaries report OK, and a subscriber on
+the broker saw `qGames/_selftest/memory` and `qGames/_selftest/chess` arrive.
+
+STILL NOT VERIFIED: a real round through `report_result()`. Every link is
+proven — QConfig layering, the schema builder's unit tests, and the client's
+socket — but nobody has finished a game since the fix. Play one and watch
+`qGames/#`.
+
+### The Pi, fixed the same way (2026-08-27)
+
+A painting saved on the Pi at 11:49 published nothing, which is the same defect:
+`strings` on all five of its binaries showed the pre-renumber `192.168.1.4`.
+The file itself is fine —
+`~/.local/share/godot/app_userdata/Paint/paintings/painting_2026-08-27_11-49-36.png`
+— it was only the telemetry that went nowhere.
+
+Ruled out first, because it was the more expensive possibility: the Pi is on
+TRUSTED (VLAN 25) and the broker is on SERVICES (VLAN 20), so a firewall rule
+would have looked identical from the game's side. It is not blocked —
+`10.118.20.4:1883` opens from the Pi. VERIFIED.
+
+Redeployed with `tools/deploy.sh q@10.118.25.17`; all five arm64 binaries now
+report `[selftest] OK` against `10.118.20.4:1883`. VERIFIED, each game.
+
+**Gen1 on the Pi is deliberately left pointing at the dead broker.**
+`~/.config/qgames/mqtt.env` there still reads `192.168.1.4` (and a different
+broker user, `qgames`). Correcting it would be one line, and it is the wrong
+move: gen1 publishes the OLD topic shape to the SAME namespace, so a gen1
+memory round would update `qGames/memory/result` and `ts` while leaving the new
+`score` sensor showing the previous game — a half-updated reading is worse than
+a silent one. Gen1's Battleship and Simon also no longer have Home Assistant
+sensors. The gen1 `.desktop` entries (`battleship`, `letters`, `memory`,
+`paint`, `sequence`, `simon`) are still in the applications menu though off the
+taskbar; deleting them is the real fix, and is the owner's call.
+
+### What is on the HA side now
+
+`/config/mqtt.yaml` was a 180-line list mixing backup drives, a UPS and five
+games. It is now two `!include_dir_merge_list` lines over `mqtt_sensors/` and
+`mqtt_cameras/`. That split is what makes YAML anchors usable — they are
+file-local, so nothing could be shared while every MQTT sensor in the house
+lived in one file.
+
+`homeassistant/` in this repo holds the four files that are actually running,
+copied back out of `/config`. See its README for the per-file detail and for
+the gotchas (`ha core check` does not validate MQTT entity schema;
+`has_entity_name` is rejected there; `isoformat` is a method, not a filter).
+
+32 sensors and one camera, five devices, one per game. Every entity that could
+keep a gen1 `unique_id` kept it — that is the identity HA keys history and
+dashboard references on, and inventing new ones is part of how gen1 accumulated
+dead entities. `sensor.qgames_memory_moves` now reads `qGames/memory/score`
+rather than `qGames/memory/moves`; the values are identical by definition and
+the history is continuous. **Nothing consumes the legacy `moves` topic any
+more.**
+
+Deleted from the entity registry: three Battleship, two Simon, and three
+orphans with no config behind them. **Assumption worth knowing:** this is only
+safe because gen1 is not publishing. Nothing has been on those topics for at
+least two days and the suite is out of this repo, but the Pi could not be
+checked. If Battleship or Simon is still alive there, its sensors need
+recreating.
+
+The Games dashboard moved out of `.storage` into `dashboards/games.yaml`,
+registered from `packages/qgames.yaml` the same way the Network dashboard is
+registered from `packages/observability.yaml` — YAML so it diffs and restores.
+One section per game, all the same shape, because the common schema means a
+section is boilerplate and only the extras differ.
+
+### Defects this turned up, still open
+
+- **`paint` publishes `duration_s` hard-coded to 0** (`games/paint/src/main.gd`).
+  A drawing pad has no round to time, but publishing a lie is worse than
+  publishing nothing — either send the time since the previous save, as `notes`
+  does, or drop the key. There is deliberately no Duration entity for paint.
+- **`chess` can report `result: draw`**, which is not one of the four values in
+  `QTelemetrySchema.RESULTS` and was not in any documentation. Either add it to
+  the schema or map it. Anything matching on `result` has to allow it today.
+- **`memory` publishes `score` and `moves` with the same number.** Harmless,
+  but the game-specific topic now has no consumer.
+- **`score_unit` has no consumer.** Every game publishes it; nothing reads it,
+  because each sensor's unit is set statically. It stays on the wire for
+  automations.
+
+
+## The Pi's dock (qdock) (2026-11-18)
+
+Source `pi/qdock/` (C, GTK3 + gtk-layer-shell + wlr-foreign-toplevel-management; protocol XML vendored from
+wlr-protocols). Built for arm64 in Docker (`pi/qdock/Dockerfile`, Debian trixie = the Pi's OS): `make -C pi/qdock`;
+`make -C pi/qdock install` copies it to `qpi:~/.local/bin/qdock`, writes `~/.config/qdock/pinned` the first time only,
+and kills the running one (lwrespawn restarts it within 1 s). Started from `~/.config/labwc/autostart`:
+`/usr/bin/lwrespawn /home/q/.local/bin/qdock &`. One per session (flock on `$XDG_RUNTIME_DIR/qdock.lock`).
+
+Behaviour (user asked for GNOME/macOS style, one window per app type to save RAM/GPU): pinned icons from
+`~/.config/qdock/pinned` (.desktop ids). Not running → click starts it (icon greys while starting; further clicks are
+ignored until a window appears or 40 s pass — never a second copy). Running → short bar under the icon; focused →
+shaded with a blue bar. Click a running app → focus (unminimizes); click the focused one → minimize; several windows →
+cycle. Right-click → Close. Unpinned apps get an icon while they run. VERIFIED on the Pi with a wlrctl virtual pointer:
+focus/minimize/restore of Paper Map and Chess, three quick clicks on Notes → one process, right-click Close.
+Idle cost: ≈0.13 % CPU, 32 MB RSS.
+
+Matching windows to icons: by Wayland app_id against the .desktop StartupWMClass / id / Exec basename / Name
+(case-insensitive), then by window title. The title fallback exists because exported Godot games report a generic
+app_id (`Godot_Engine` under Xwayland, `org.godotengine.Godot` natively; chess showed `Chess` once) — so **game window
+titles must equal their .desktop Name** (Chess, Memory Match, Notes, Paint, Sequence). Paper Map's Chromium window is
+`chrome-10.118.20.5__-Default` (its .desktop carries that; rafterw-paper-map deploy/qpi). `QDOCK_DEBUG=1` prints
+every window's app_id and title.
+
+It sits over the left end of wf-panel-pi (top layer, exclusive zone -1, 52 px, background #deddda = the panel's
+colour); a respawned panel would cover it, so it re-maps itself when wf-panel-pi's pid changes. If the panel's
+height or theme changes, adjust PANEL_HEIGHT / QDOCK_BG. `make deploy` still rewrites `qgames-*.desktop` — harmless,
+the dock reads them as they are.
+
+Measured with Paper Map + all five games open, memory focused, idle (2026-11-18, after the idle-rendering work below):
+V3D render 0 % (was 71 % before it), 2.4 GB RAM used of 7.8.
+
+## Idle and background rendering (2026-11-18)
+
+**Problem.** Every game rendered 60 full frames a second for as long as it was
+open, whether it was idle, focused or not. On V3D a frame costs ~12 ms of GPU
+whatever is in it (see "Framerate on the Pi"), so one idle focused game held the
+render queue ~80% busy and ~45-65% of a core.
+
+**What changed.** All of it is shared code, except where a game had its own idle
+animation:
+
+1. **On-demand rendering.** `application/run/low_processor_mode=true` in all
+   five `project.godot`. The engine draws only when something on screen changed
+   (`RenderingServer.has_changed()`: queue_redraw, tweens, property changes).
+   Anything that animates still runs at full rate. QGameRoot re-applies it from
+   `QConfig render/on_demand` (default true). **Benchmark framerate with
+   `QGAMES_RENDER_ON_DEMAND=false`**: with on-demand on, the engine's FPS
+   monitor counts loop iterations, not frames. QDebug now shows `drawn N/s`
+   beside fps for that reason (`QDebugStats.drawn_fps`).
+2. **Background cap.** `QGameRoot` sets `Engine.max_fps` to
+   `render/background_fps` (default 10) on `NOTIFICATION_APPLICATION_FOCUS_OUT`
+   and restores the project's own value on FOCUS_IN. The decision is pure and
+   tested: `shared/qcore/power_policy.gd` (`QPowerPolicy.decide`), tests in
+   `games/memory/tests/run.gd`. 10 rather than lower because it is also the
+   worst-case delay before a background game notices it was clicked.
+3. **The silent games use the Dummy audio driver.** `[audio]
+   driver/driver="Dummy"` in memory, notes, paint and sequence. The PulseAudio
+   driver mixes silence on its own thread for as long as the game is open: ~8%
+   of a core per game on the Pi, measured per thread. Chess has sound and keeps
+   PulseAudio, which is why it idles a few percent above the others.
+4. **Per-game idle animations.**
+   - sequence: the question cell and the progress strip breathe at 20 Hz. Each
+     kept a private accumulator, and they drift out of phase because each stops
+     while its own animation is hidden. Under on-demand rendering that means up
+     to 40 frames a second instead of 20. They now share one wall-clock tick,
+     latched once per process frame, and both pause on application focus-out.
+   - notes: the editor caret stops blinking and hides on application focus-out,
+     as in any desktop editor, and comes back solid on focus-in.
+
+**Measured** on the Pi 4 (labwc, 1080p, display forced on with `wlopm --on`,
+Paper Map open underneath). Games launched with `DISPLAY=:0` as the taskbar
+does, so they run under **Xwayland**. 15 s settle, then a 10 s window. GPU =
+Δruntime/Δwall of the `render` queue in `/sys/class/drm/card0/device/gpu_stats`.
+CPU = Δ(utime+stime) from `/proc/<pid>/stat`. Old = the build installed
+2026-08-27, new = this change. Old and new were measured back to back.
+
+| condition | render busy old → new | game CPU old → new | RSS |
+|---|---|---|---|
+| map only | 5.6% → 2.8% | — | — |
+| chess alone, idle (New-game card) | 86.6% → 0.4% | 48.0% → 16.6% | 178 MB |
+| memory alone, idle | 78.5% → 0.4% | 44.3% → 11.6% | 170 → 169 MB |
+| notes alone, idle | 85.8% → 3.6% | 44.5% → 14.9% | 182 → 180 MB |
+| paint alone, idle | 82.3% → 0.4% | 49.5% → 11.6% | 177 → 175 MB |
+| sequence alone, idle | 77.9% → 25.5% | 67.1% → 42.5% | 174 → 172 MB |
+| all five, memory focused | 81.9% → 0.3% | focused 45.5 → 9.9; each background 8-10 → 4-7 | |
+| all five, sequence focused | 81.6% → 26.7% | focused 74.0 → 46.1; each background 9-10 → 4.5-8 | |
+
+The 10 s windows have noise of a few percent. Notes' 3.6% is its caret blinking,
+2 frames a second. RSS did not change: on-demand rendering frees no memory.
+
+**Under Xwayland, the BACKGROUND games were already cheap before this.** With
+five open, the covered ones measured 8-10% CPU each and added nearly nothing to
+the GPU. That suggests Xwayland stops completing their presents while they are
+covered (inferred, not traced). The big win is the FOCUSED idle game, which
+always drew 60 frames a second.
+
+**Where the rest goes, for anyone continuing.**
+- **sequence, focused:** 20 frames/s of breathing costs ~25% GPU and ~30% of a
+  core. Every frame re-renders the whole viewport, and Godot's 2D renderer does
+  not redraw only the damaged part. `PULSE_HZ` is the knob: 10 would roughly
+  halve this. It was left at 20 because that changes how the game looks.
+- **A focused idle game's ~11% CPU** is the 145 Hz idle loop plus the Xwayland
+  event and audio threads. `low_processor_mode_sleep_usec=16666` measured
+  memory at 11.7% → 7.9%. It was NOT adopted: a 60 Hz sleep cadence beats
+  against 60 Hz vsync during animation (a judder risk), and it adds up to
+  10 ms of input latency. Test it with an `override.cfg` next to the binary,
+  `[application] run/low_processor_mode_sleep_usec=16666`. That file is how the
+  variants here were tried without rebuilding.
+- **Native Wayland** (`display/display_server/driver.linuxbsd="wayland"`, or
+  launch with no `DISPLAY`) was measured and NOT adopted:
+
+  | | Xwayland | native Wayland |
+  |---|---|---|
+  | memory focused idle: game / labwc / Xwayland CPU | 11.7 / 0.2 / 2.7 | 3.6 / 4.0 / 0 |
+  | sequence focused: render busy | 26.3% | 33.6% |
+  | sequence focused: game / labwc / Xwayland CPU | 43.7 / 3.0 / 2.8 | 34.7 / 5.6 / 0 |
+  | all five, background games each | 4-8% | ~1.2% |
+
+  So Wayland is cheaper on CPU, but costs more GPU while animating. Godot's
+  Wayland backend also commits the surface on every idle iteration under
+  low-processor mode (`DisplayServerWayland::process_events`), which is
+  probably labwc's 4% (inferred from the source, not traced). It also changes
+  the app_id from `Godot_Engine` (Xwayland) to `org.godotengine.Godot`; titles
+  are unchanged. Paint's cursor hiding, notes' IME and clipboard, and input in
+  general are untested there. It renders correctly: maximized, decorated, same window title
+  (screenshot). Revisit it if the CPU matters more than the GPU.
+
+**Verified on the Pi:** every number above; the background cap engages (memory's
+HUD reads 145 → 10 loop/s when another game takes focus); the paint drag bench
+(`--paintdrag`) holds 60 drawn/s at 16.6 ms under on-demand, the same as
+before; sequence played by keyboard through XTEST: input lands, transitions
+draw at ~60/s and then fall back to the 20/s breath; screenshots of sequence
+and paint look as before. `make test-all` passes. **Not verified:** chess piece
+slides and memory card flips were not driven, because there was no input
+injection for mouse. They use the same tween and queue_redraw paths that were
+exercised.
+
+**Deployed 2026-11-18** to `qpi`, all five. The binaries were swapped in place
+under `~/.local/share/qgames/<id>/` (atomic `mv`). `make deploy` was NOT used,
+because its `install.sh` rewrites `~/.local/share/applications/qgames-*.desktop`,
+and that directory was off-limits while the new dock was being built. The
+installed builds measure the same as the table above. `--telemetry-selftest`
+passes from the installed memory and chess (broker 10.118.20.4:1883).
+
+**Window title is unchanged** and must stay equal to the .desktop Name. The new
+dock identifies games by title.
+
+## Chess: Cburnett piece set and Training mode (2026-11-18)
+
+**Pieces.** The owner asked for a free classic set, with a cross on the king and
+a real crown on the queen. Shipped: Colin M.L. Burnett's set from Wikimedia
+Commons (`Chess_{k,q,r,b,n,p}{l,d}t45.svg`). It is the one Wikipedia and lichess
+use. Wikimedia offers it under four licences, and we use the **3-clause BSD**
+option (VERIFIED on the Commons file page). The repo is public with no licence of
+its own, so a GPL-only or NC set (most of lichess's sets) was the wrong fit.
+- Files: `games/chess/assets/pieces/*.svg`, each with an attribution comment.
+  Full text is in `assets/pieces/LICENSE.txt`, which every export preset now
+  carries via `include_filter`, so binaries meet BSD clause 2.
+- **Bishops are modified at the owner's request:** the cross on the mitre is
+  replaced by the classic diagonal slit, a narrow filled wedge from the upper
+  right. Black on the white bishop, white on the black one.
+- Merida (GPLv2+) was the alternative compared.
+- The files carry no `GENERATED_MARK`, so the drift test treats them as
+  hand-made and leaves them alone.
+- ⚠ **`make chess-pieces-repo` would overwrite them with the drawn set** from
+  `src/pieces.gd`. Don't run it unless replacing this set is the point.
+- `icon.svg` is still the drawn knight; it was not changed.
+- Godot rasterises these files correctly. VERIFIED: a sheet rendered via
+  `Image.load_svg_from_string`, plus interactive screenshots.
+
+Small fix found on the way: SVG pieces ignored the capture fade's alpha, because
+`draw_texture_rect` had no modulate. Now `piece_art.gd` passes the fill's alpha.
+
+**Training mode.** A "Training" button in the panel opens a card with a master
+switch and one switch per aid. Aids keep their own setting while the master is
+off.
+- Prefs: `chess/training` (default off) and `chess/training_danger` (default on).
+- The button reads "Training: on" while the master switch is on.
+
+The first aid is **danger squares**. **Redefined the same day by the owner:**
+not just "your pieces that can be taken" but EVERY square where the computer
+could take a piece of yours, i.e. its take squares. That includes empty squares
+and its own protected pieces, since taking one gets you taken back.
+- `ChessBoard.danger_squares(victim)`, for each square: a cheap `is_attacked`
+  prefilter, then a stand-in `victim` pawn is placed on the square and the
+  opponent's captures onto it are tested for legality. So a pinned attacker
+  doesn't count, and a king can't "take" a protected square. `capturable()` is
+  merged in for en passant.
+- Cost on the desktop is 0.9–1.6 ms per call (start position, a middlegame,
+  kiwipete). On the Pi 4 it is inferred at about 10–20 ms, once per position
+  change; selecting a piece recomputes only the hang dots. Not measured on the
+  Pi.
+- **Superseded first version:** the human's pieces that the opponent can LEGALLY
+  take are washed red. Alpha is
+  0.34 on light squares and 0.50 on dark, because red over the green mixes to
+  olive at 0.34 (swatch-checked).
+- When a piece is selected, any destination where it could be taken straight
+  back shows a red dot instead of grey.
+- It covers the human's pieces only. Shading the computer's hanging pieces
+  would be playing for the child.
+- The model functions are `ChessBoard.capturable(victim)` and `move_hangs(m)` in
+  `board.gd`. They are legal rather than attacked, so a pinned attacker doesn't
+  count, en passant does, and kings are excluded (check has its own glow).
+- They are recomputed on `show_position` and `select` only, never per frame.
+- Tests: `tests/run.gd` `_test_danger_squares` covers pinned, en passant, both
+  turns, no mutation and move_hangs. `tests/interactive.gd` drives the card and
+  checks a light and a dark danger square plus the hang dot. Results: 217
+  headless pass, interactive all pass (2026-11-18).
+**Second aid, attack squares (2026-11-18):** the same question asked the other
+way round, `danger_squares(-human)`, shaded blue.
+- Its switch is `chess/training_attack` (default on).
+- Alpha is 0.38 on light squares and 0.56 on dark (blue over green reads teal
+  below that; swatch-checked).
+- A square that is both red and blue is split on the diagonal, red top-left and
+  blue bottom-right. Stacking the two washes gives an unreadable purple.
+- Own protected pieces count as attack squares, mirroring the danger rule.
+- The owner's note: both maps are deliberately noisy for now, and they plan to
+  "logically trim the noise later".
+- The training card does not scroll. It fits at 1280x720 at reading size 1.0.
+  Unverified at larger reading sizes.
+
+**Point at a piece (2026-11-18).** The owner's goal: "help a student learn which
+squares are safe and which are not". Pointing at a piece narrows the maps to
+that ONE piece: a computer piece shows its take squares in red, one of the
+player's shows its take squares in blue.
+- "Pointing" means any of three things: mouse hover; the keyboard cursor; or the
+  last piece tapped, of either colour, since touch has no hover (house rule 5).
+  The board view tracks it in `_inspect` and updates it via `set_inspect`.
+- It works on a read-only board too, e.g. when reviewing a finished game.
+- The third switch, "Only the piece I point at" (`chess/training_hover_only`,
+  default on), decides what shows when nothing is pointed at: on shows nothing,
+  off shows the whole-board maps.
+- Model: `danger_squares(victim, from_sq)` and `capturable(victim, from_sq)`;
+  `pseudo_moves(captures_only, only_from)` generates moves for one piece only.
+- The maps are recomputed only when the pointed-at square changes.
+- The training card now scrolls, the same way as the setup card
+  (`_fit_training`).
+- Interactive test stages 06c/06d move a real mouse over d5 (the computer's)
+  and g5 (the player's) and check both sets. Results: 228 headless pass,
+  interactive all pass.
+
+**Danger badges and take chains (2026-11-18).** The fourth switch is "Take
+chains" (`chess/training_chains`, default on).
+- **Badge:** a "!" in the top-right corner of each of the player's pieces that
+  the computer can take without losing on the exchange. Red when the taker
+  wins material, amber for an even trade. A protected piece the taker would
+  lose on gets no badge. Badges show all the time; they do not need pointing.
+- **Chain:** pointing at any piece that can be taken shows its capture
+  sequence: an arrow from each taker, a numbered disc on the taker for the
+  order, red for the computer and blue for the player. Steps past where a
+  sensible player stops are faded (alpha 0.28). A pill on the square gives the
+  verdict: "lose N", "win N", "even trade", "safe" or "protected". The panel
+  shows the same thing in a sentence, in the `_explain` label under the status
+  (the status line is rewritten every frame while the computer thinks).
+- **Model:** `ChessBoard.take_chain(sq)` plays the exchange out with make/unmake,
+  each side taking with its least valuable LEGAL capturer. Pins, kings and
+  x-rays come out right without special cases. A promotion counts as a queen
+  only. The worth is computed by backward induction with stand-pat:
+  `v[d] = gain[d] - max(0, v[d+1])`, and `played` is the first d with `v[d] < 0`.
+  Values are P1 N3 B3 R5 Q9 (`TRADE_VALUE`). `pieces_in_danger(owner)` returns
+  the pieces where the taker's worth >= 0.
+- **Text:** `ChessBoardView.explain_chain()` is static, so it is unit-tested.
+- **Tests:** `_test_take_chains` covers a hanging piece, an even trade, a
+  protected piece, an x-ray queen, a pinned recapturer and a king target.
+  Interactive stage 06e checks the badges on both knights, the chain on e4 and
+  the panel sentence. Results: 243 headless pass, interactive all pass.
+- **Cost on the desktop:** `pieces_in_danger` takes 0.05–0.77 ms and
+  `take_chain` 0.15 ms or less. The Pi is not measured.
+- **Training card:** the aids now sit two to a row when the window is at least
+  860 px wide (logical). Four in one column put Done below the fold at
+  1280x720. When the card scrolls, the scrollbar gets its own width.
+
+- **The dev laptop is the owner's play/test machine for chess (2026-11-18).**
+  Every chess change also gets an x86_64 export, installed to
+  `~/.local/share/qgames/chess/chess` with an atomic `mv`. The app menu's
+  `qgames-chess.desktop` runs that path. The Pi is updated only on request.
+- **The take-squares version is installed only on the desktop**
+  (`~/.local/share/qgames/chess`). The Pi still has the first version.
+- `tests/interactive.gd` now saves and restores the player's training prefs. It
+  writes the real `user://config.cfg`, and an earlier version of it switched
+  the owner's training setting off.
+- **Deployed to `qpi` 2026-11-18 16:15** using the same in-place swap as the
+  earlier deploy (arm64 export, scp, atomic `mv`; sha256 matches the local
+  build). The installed binary reports `pieces from res://assets/pieces (12 of
+  12)`, and `--telemetry-selftest` is OK.
+- Not yet measured on the Pi: the cost of `capturable` per move (one legal-move
+  generation, flip side; `move_hangs` per target when selecting). Inferred
+  cheap, under about 30 ms.
+
 ## Open threads
 
+- **Friends play from a git clone (2026-11-18).** The repo is public (github.com/collier-watkins/qGames, checked
+  via the API). README "Play them at home": install Godot 4.7.2, clone, Import + ▶ or `make run GAME=<g>`.
+  VERIFIED on a fresh clone: `make run` used to fail with parse errors (no `.godot` → no class_name registry), so
+  `run` now imports first like `test`; `--rendering-driver opengl3` and `--rendering-method gl_compatibility` both
+  start Compatibility mode. Windows needs Developer Mode + `core.symlinks=true` (`addons/qcore` is a symlink) —
+  inferred, not tried on Windows. Not yet: packaged builds for Windows/macOS (templates for both are installed;
+  `dist` bakes the broker password — friends' builds need `bake_config.sh --no-secrets`). No LICENSE file.
 - **Android is the last unanswered spike question.** Needs JDK 17 and the
   Android SDK before an export preset can even be written. Everything else the
   spike set out to test has held across three games.
@@ -1668,5 +2112,9 @@ without a display; there is no need to guess at them.
   picked up, that project goes editor-first (tilemaps, atlases, animation, dialogue data)
   and the division of labour inverts: systems in code, content in the editor. Everything
   else here — qcore, CI, export matrix, monorepo shape — transfers.
-- **Old suite** at `~/Projects/qGames` stays as-is and keeps running on the Pi. No
-  migration is planned until this platform earns it.
+- **Old suite.** Gen2 was promoted to the repo root in `2cf1dd5`, so
+  `~/Projects/qGames` is now THIS suite, not the old one — the gen1 tree is no
+  longer in this repository. It is believed to still run on the Pi, which
+  rejects our SSH key, so that is unverified as of 2026-08-27. Nothing has
+  published a gen1-only topic (`battleship`, `simon`) to the broker in at least
+  two days, and Home Assistant's sensors for them were deleted on that basis.
