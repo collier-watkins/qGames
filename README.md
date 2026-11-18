@@ -1,4 +1,4 @@
-# qGames2
+# qGames
 
 Small, calm games for kids. One repo, many games, shared infrastructure.
 Native on ARM Linux, x86_64 Linux, and Android. Touch and keypad are both
