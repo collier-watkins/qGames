@@ -51,6 +51,7 @@ import: _check-game
 >$(GODOT) --headless --path games/$(GAME) --import
 
 run: _check-game
+>@$(call ensure_import,$(GAME))
 >$(GODOT) --path games/$(GAME)
 
 # A fresh clone has no games/<g>/.godot — it is generated, and correctly
