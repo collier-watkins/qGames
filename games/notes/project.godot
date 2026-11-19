@@ -94,6 +94,10 @@ window/size/resizable=true
 ; window in the corner of a 1080p panel is just small — and the panel is at
 ; the top, so maximized (not fullscreen) keeps the taskbar reachable.
 window/size/mode=2
+; Let the screen sleep. Godot's default (true) holds a Wayland idle inhibitor for as long as the window
+; exists, and labwc honours any inhibitor, hidden or minimised, so one open game kept the Pi's screen on
+; for good. These games never need the screen held awake without input.
+window/energy_saving/keep_screen_on=false
 ; Stretch is "viewport" on desktop and DISABLED on Android, and the split is
 ; the whole point — the two platforms want opposite things here.
 ;
