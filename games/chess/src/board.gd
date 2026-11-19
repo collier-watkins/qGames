@@ -500,6 +500,132 @@ func in_check(colour: int = 0) -> bool:
 	return k >= 0 and is_attacked(k, -c)
 
 
+func checkers(colour: int = 0) -> Array:
+	## The pieces giving check to `colour`'s king (default: the side to move),
+	## each {from: int, piece: int, line: PackedInt32Array}. `line` is the
+	## squares strictly between the checker and the king, from the checker's
+	## end: the only squares a block can go to. Empty for a pawn, a knight, or a
+	## piece standing next to the king, which is why those cannot be blocked.
+	## The same scan as is_attacked(), but collecting instead of stopping.
+	var c: int = colour if colour != 0 else side
+	var k: int = king_sq[0 if c == WHITE else 1]
+	var by: int = -c
+	var out: Array = []
+	if k < 0:
+		return out
+	for d: int in [15 * by, 17 * by]:
+		var t: int = k - d
+		if not (t & 0x88) and board[t] == PAWN * by:
+			out.append({"from": t, "piece": board[t], "line": PackedInt32Array()})
+	for d: int in KNIGHT_D:
+		var t: int = k + d
+		if not (t & 0x88) and board[t] == KNIGHT * by:
+			out.append({"from": t, "piece": board[t], "line": PackedInt32Array()})
+	for pair: Array in [[BISHOP_D, BISHOP], [ROOK_D, ROOK]]:
+		for d: int in pair[0]:
+			var between: PackedInt32Array = PackedInt32Array()
+			var t: int = k + d
+			while not (t & 0x88):
+				var p: int = board[t]
+				if p != 0:
+					if p == int(pair[1]) * by or p == QUEEN * by:
+						between.reverse()
+						out.append({"from": t, "piece": p, "line": between})
+					break
+				between.append(t)
+				t += d
+	return out
+
+
+func attackers(sq: int, by: int) -> PackedInt32Array:
+	## Every piece of side `by` that attacks `sq`: is_attacked(), collecting
+	## instead of stopping. Attack in the king-safety sense — a pinned piece
+	## still counts, because a pinned piece still stops a king stepping there.
+	var out: PackedInt32Array = PackedInt32Array()
+	for d: int in [15 * by, 17 * by]:
+		var t: int = sq - d
+		if not (t & 0x88) and board[t] == PAWN * by:
+			out.append(t)
+	for pair: Array in [[KNIGHT_D, KNIGHT], [KING_D, KING]]:
+		for d: int in pair[0]:
+			var t: int = sq + d
+			if not (t & 0x88) and board[t] == int(pair[1]) * by:
+				out.append(t)
+	for pair: Array in [[BISHOP_D, BISHOP], [ROOK_D, ROOK]]:
+		for d: int in pair[0]:
+			var t: int = sq + d
+			while not (t & 0x88):
+				var p: int = board[t]
+				if p != 0:
+					if p == int(pair[1]) * by or p == QUEEN * by:
+						out.append(t)
+					break
+				t += d
+	return out
+
+
+func king_trap() -> Array:
+	## The side to move's king and the squares round it: why it can or cannot
+	## step to each. [{sq, own: bool, guards: PackedInt32Array}] — `own` is one
+	## of its own pieces in the way; `guards` are the enemy pieces covering the
+	## square, asked with the king lifted off the board so that the square
+	## behind it on a checker's line counts as covered (it is: the king cannot
+	## step back along the line it is attacked on). A square neither own nor
+	## guarded is somewhere the king can go. On a checkmate every square is
+	## one or the other, which is the picture of a trap.
+	var k: int = king_sq[0 if side == WHITE else 1]
+	var out: Array = []
+	if k < 0:
+		return out
+	var king: int = board[k]
+	board[k] = 0
+	for d: int in KING_D:
+		var t: int = k + d
+		if t & 0x88:
+			continue
+		var own: bool = board[t] != 0 and (board[t] > 0) == (side > 0)
+		out.append({"sq": t, "own": own,
+				"guards": PackedInt32Array() if own else attackers(t, -side)})
+	board[k] = king
+	return out
+
+
+func check_info() -> Dictionary:
+	## Why the side to move is in check, and every way out, read from the legal
+	## moves so pins come out right: a piece pinned to its king can neither
+	## block nor take. {} when not in check. Otherwise:
+	##   king:       the king's square
+	##   checkers:   see checkers()
+	##   king_moves: squares the king can step to (taking the checker included)
+	##   blocks:     squares another piece can step into to cut the line
+	##   takers:     squares of pieces other than the king that can take the
+	##               checker. Always empty in double check, as are blocks: one
+	##               move cannot deal with two checkers, only the king can run.
+	var found: Array = checkers()
+	if found.is_empty():
+		return {}
+	var k: int = king_sq[0 if side == WHITE else 1]
+	var checker_sq: int = int(found[0]["from"]) if found.size() == 1 else -1
+	var king_moves: PackedInt32Array = PackedInt32Array()
+	var blocks: PackedInt32Array = PackedInt32Array()
+	var takers: PackedInt32Array = PackedInt32Array()
+	for m in legal_moves():
+		var f: int = move_from(m)
+		var t: int = move_to(m)
+		if f == k:
+			if not king_moves.has(t):
+				king_moves.append(t)
+			continue
+		var taken: int = t - 16 * side if move_flag(m) == FLAG_EP else t
+		if taken == checker_sq:
+			if not takers.has(f):
+				takers.append(f)
+		elif not blocks.has(t):
+			blocks.append(t)
+	return {"king": k, "checkers": found, "king_moves": king_moves,
+			"blocks": blocks, "takers": takers}
+
+
 # ---------------------------------------------------------- move generation
 
 func pseudo_moves(captures_only: bool = false, only_from: int = -1) -> PackedInt32Array:

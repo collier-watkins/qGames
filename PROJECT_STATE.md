@@ -1952,6 +1952,105 @@ chains" (`chess/training_chains`, default on).
   generation, flip side; `move_hangs` per target when selecting). Inferred
   cheap, under about 30 ms.
 
+**Knight arrows bend (2026-11-19).**
+- Any arrow between squares a knight's jump apart, hint or take chain, is drawn as the classic L: the long leg
+  first, then the short leg into the target (`_arrow_points`, `_draw_arrow_path` in `board_view.gd`).
+- The bent shaft is one mitred polygon, not two lines, so a faded (translucent) step has no darker patch at the
+  bend. Polygons are not antialiased, unlike the straight shafts' `draw_line(..., true)`.
+- VERIFIED by screenshot `06e_take_chain` (Ng5 to e4 bends at e5). The hint arrow uses the same path, but no
+  screenshot shows a knight hint.
+- The verdict pill sits above the target, so it can overlap the short leg's bend.
+
+**Why check (2026-11-19).** A fifth training aid, "Why check", pref `chess/training_checks`, default true. It
+covers either side's check: the one the player gets and the one the player gives.
+- **Model.**
+  - `ChessBoard.checkers()` returns the checking pieces. Each has its `line`: the squares between it and the king,
+    listed from the checker's end. The line is empty for a pawn, a knight, or a piece standing next to the king.
+  - `check_info()` sorts every legal move into `king_moves`, `blocks` and `takers`. Reading from the legal moves
+    means pins, and en passant of a checking pawn, come out right.
+  - `ChessBoardView.explain_check()` puts it into words: who attacks the king and how, then the ways out. A
+    knight's check also says it cannot be blocked. Double check says only the king can move.
+- **Board.** Over the pieces, an arrow from each checker to the king (an L for a knight), after the move's slide
+  lands. The king's pulsing glow says "check".
+- **Panel.** The board's signal is now `explained` (was `chain_explained`). It carries the check text, then the
+  pointed-at piece's take chain.
+- **Hold.** When the player gives check, the computer waits `CHECK_HOLD_MS` (3000 ms) on top of its thinking floor
+  (`ChessOpponent.think(..., hold_ms)`), or the picture would be gone within half a second. Its clock runs
+  meanwhile. During that wait the status reads "You have given check", not "Thinking...".
+- **Training card.** It has five aids, and the descriptions were cut to two lines each so the card fits 1280x720 with Done visible and no scrollbar (screenshot `06a_training_card`).
+- **Ways out on the board (2026-11-19), in green, for either side's check:**
+  - a dot where the king can step, or a ring where it steps by taking;
+  - a box on each square a block can go to;
+  - an arrow from each piece that can take the checker.
+- **Checkmate as a trap (2026-11-19).**
+  - `ChessBoard.king_trap()` takes each square round the mated king and records whether its own piece is in the
+    way, and which enemy pieces cover it. It asks with the king lifted off the board, so the square behind the king
+    on the checker's line counts as covered. `attackers(sq, by)` is `is_attacked()`, collecting instead of stopping.
+  - On the board: a red X on each covered square, an amber box on each square the king's own piece fills, and a
+    thin ring on each enemy piece that helps the checker. An attacking piece next to the king gets no mark: an X
+    (then a corner X badge) on the winner's own piece read as "this piece is wrong" (owner, 2026-11-19). The ring
+    on its protector carries the "why can't the king take it".
+  - In the panel: "Checkmate! ... It is a trap: their rook on a8 covers f8 and h8, your own pawns fill f7, g7 and
+    h7, and nothing can block the rook or take it."
+  - The trap shows on every checkmate, with the aid on or off.
+- **Checkmate show (2026-11-19).**
+  - On mate `_on_game_over` calls `ChessBoardView.celebrate_mate(won)`, and the end card waits for the `mate_done`
+    signal (`_mate_pending`).
+  - Timeline from when the mating move lands: the trap at once. At `MATE_TOPPLE_AT` 1.4 s the mated king tips
+    over (78°, away from the checker), the result sound plays, and a "Checkmate!" banner pops on the half of the
+    board away from the king ("You won!" in green, "The computer won" in red). For a win, about 160 confetti
+    pieces also burst from the mating piece and both top corners.
+  - The end card comes at `MATE_DWELL` 6 s, or on a tap or `ui_accept` after `MATE_SKIP_AFTER` 0.8 s.
+  - The toppled king stays down under the card and in "Look at the game"; `show_position()` resets it.
+  - Other endings (resign, flag, draw) still show the card at once.
+- **Noise pass (2026-11-19), gallery-reviewed over 16 positions (`tests/gallery_checks.gd`).** Removed:
+  - the red wash on the line of attack (it repeated the arrow, read brown on dark squares, and fought the green
+    block boxes on the same squares);
+  - the box round the checker (the arrow's tail already points at it, on top of the last-move highlight);
+  - the "check"/"double check"/"checkmate" pill (it covered the piece above the king, and the glow, the panel and
+    the mate banner say it);
+  - the guard lines to each X in the trap (on ladder and queen mates they crossed the king and each other; the
+    panel names who covers what);
+  - the "!" danger badges while the check aid is up;
+  - the "Check! " lead of the explanation (the status line above says it; "Double check!" and "Checkmate!" stay);
+  - the mated king's glow, which now fades out as it topples.
+- **Test gotcha:** `_clear_overlay()` uses `queue_free`, so a just-closed card's veil still swallows clicks parsed
+  in the same frame. Start the new game in one stage and play in the next.
+- **Tests.** `tests/run.gd` `_test_check_why`: back-rank, smothered and protected-checker mates (270 pass). Interactive mate stages: `mate_trap`, `mate_party`, `mate_card` (card only after the dwell) and `mate_skip` (a tap brings the card); shots `06h`-`06j`. `tests/interactive.gd` stages `check_shown` (Ra1-a8+
+  played through the board; the computer's reply is still pending after 1.2 s), `check_answered` and
+  `check_received`; screenshots `06f_check_given` and `06g_check_received`. All pass.
+
+## Pi screen never turned off: Godot's idle inhibitor (2026-11-19)
+
+**Symptom.** The Pi's screen stayed on past the 5-minute blank.
+
+**Not the cause.** The blank itself is fine. `~/.config/labwc/autostart` runs
+`swayidle -w timeout 300 'wlopm --off \*' resume 'wlopm --on \*'`, and it was running (VERIFIED, ps).
+
+**Cause, VERIFIED.**
+- Godot's `display/window/energy_saving/keep_screen_on` defaults to true. On native Wayland, which is how the games
+  run on the Pi (no `DISPLAY` in their environ), that sends `zwp_idle_inhibit_manager_v1.create_inhibitor` on the
+  main surface. Seen with `WAYLAND_DEBUG=1` on the Pi.
+- labwc 0.9.2 sets the session inhibited while any inhibitor exists, whatever the surface's visibility
+  (`src/idle.c`, `handle_idle_inhibitor_new` / `_destroy`).
+- So one open game, even minimised, holds the screen on forever. A probe on the Pi
+  (`swayidle timeout 5 'echo IDLE'` for 15 s, with notes and paint open) never fired.
+
+**Fix.** `window/energy_saving/keep_screen_on=false` in all five `project.godot` files. That includes memory's,
+which `tools/new_game.sh` copies for new games. Checked on the laptop under GNOME Wayland: the old chess build sends
+1 `create_inhibitor`; the new build sends none.
+
+**Pending.**
+- Deployed to the Pi 2026-11-19 (`0.1.0+21.gbd544c6.dirty`). On the Pi the new chess binary sends 0
+  `create_inhibitor` (VERIFIED, `WAYLAND_DEBUG`). Notes and Paint processes started before the deploy were still
+  open; they keep their inhibitors until they exit.
+- Confirmed 2026-11-19 after the owner closed the games: the probe (`swayidle timeout 5`) fired in 5 s. That means
+  the idle notifier is no longer inhibited. The real 300 s `wlopm --off` was not watched; inferred to work, since it
+  uses the same notifier.
+- Paper Map was also closed for that probe, so whether its chromium inhibits is still unchecked.
+- The old Notes process (pid 15486, exe `(deleted)`) was still alive after the owner closed it. Idle fired anyway,
+  so its surface, and with it the inhibitor, is gone. Why the process outlived its window was not investigated.
+
 ## Open threads
 
 - **Friends play from a git clone (2026-11-18).** The repo is public (github.com/collier-watkins/qGames, checked

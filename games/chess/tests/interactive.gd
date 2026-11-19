@@ -65,6 +65,15 @@ func _initialize() -> void:
 		_stage_point_mine,
 		_stage_point_chain,
 		_stage_point_done,
+		_stage_check_shown,
+		_stage_check_answered,
+		_stage_check_received,
+		_stage_mate_trap,
+		_stage_mate_party,
+		_stage_mate_card,
+		_stage_mate_again,
+		_stage_mate_skip,
+		_stage_mate_skipped,
 		_stage_training_off,
 		_stage_promotion_setup,
 		_stage_promotion_shown,
@@ -292,7 +301,7 @@ func _stage_training_open() -> bool:
 	# prefs from a real game already have it switched on.
 	_saved_training = [_view.get("_pref_training"), _view.get("_pref_train_danger"),
 			_view.get("_pref_train_attack"), _view.get("_pref_train_hover"),
-			_view.get("_pref_train_chains")]
+			_view.get("_pref_train_chains"), _view.get("_pref_train_checks")]
 	var button: Button = _view.get("_btn_training")
 	_ck_true("training mode is reachable from the panel", button != null)
 	_click(button.get_global_transform() * (button.size * 0.5))
@@ -423,6 +432,129 @@ func _stage_point_chain() -> bool:
 
 func _stage_point_done() -> bool:
 	_ck("moving off the board clears it", (_board.get("_attack") as PackedInt32Array).size(), 0)
+	# Why check: the player gives one through the real board, Ra1-a8+.
+	_view.set("_pref_train_checks", true)
+	_view.call("_apply_training")
+	var game = _view.get("_game")
+	_ck("the player is white here", game.human_side, ChessBoard.WHITE)
+	game.board = ChessBoard.new("3k4/8/8/8/8/8/8/R3K3 w - - 0 1")
+	_board.call("show_position", game.board)
+	_click(_square_pos("a1"))
+	_wait(120)
+	_click(_square_pos("a8"))
+	# Long enough for the slide to land, well inside the computer's hold.
+	_wait(1200)
+	return false
+
+
+func _stage_check_shown() -> bool:
+	var check: Dictionary = _board.get("_check")
+	_ck_true("giving check shows why", not check.is_empty())
+	if not check.is_empty():
+		_ck("...the checker is the rook", ChessBoard.square_name(int(check["checkers"][0]["from"])), "a8")
+		_ck("...its line runs to the king", _names(check["checkers"][0]["line"]), ["b8", "c8"])
+	_ck_true("the computer holds its reply so it can be seen",
+			(_view.get("_opponent") as RefCounted).call("is_thinking"))
+	var status: Label = _view.get("_status")
+	_ck("...and the status says so", status.text, "You have given check")
+	var explain: Label = _view.get("_explain")
+	_ck_true("the panel says why", explain.visible and explain.text.begins_with(
+			"Your rook on a8 attacks their king straight along the row."))
+	print("      panel: ", explain.text)
+	_shot("06f_check_given")
+	_wait(3200)
+	return false
+
+
+func _stage_check_answered() -> bool:
+	_ck_true("the computer has answered the check",
+			not (_view.get("_opponent") as RefCounted).call("is_thinking"))
+	var game = _view.get("_game")
+	_ck_true("...and the check, with its picture, is gone",
+			not game.board.in_check() and (_board.get("_check") as Dictionary).is_empty())
+	# Now the player is in check: the b4 bishop on e1, blockable on c3 or d2.
+	game.board = ChessBoard.new("4k3/8/8/8/1b6/P7/8/1N2K3 w - - 0 1")
+	_board.call("show_position", game.board)
+	_view.call("_update_status")
+	_wait(150)
+	return false
+
+
+func _stage_check_received() -> bool:
+	var explain: Label = _view.get("_explain")
+	_ck_true("being in check shows the ways out", explain.visible and explain.text.begins_with(
+			"Their bishop on b4 attacks your king along the diagonal. Ways out:"))
+	_ck("...the status says check", (_view.get("_status") as Label).text, "Check!")
+	_shot("06g_check_received")
+	# Escapes in green: e2 and the others for the king, c3/d2 blocks, a3 takes.
+	var check: Dictionary = _board.get("_check")
+	_ck("...and its ways out are on the board", [_names(check["blocks"]), _names(check["takers"])],
+			[["c3", "d2"], ["a3"]])
+	_play_mate()
+	_wait(1000)
+	return false
+
+
+func _play_mate() -> void:
+	## Back-rank mate through the real board: Ra1-a8#.
+	var game = _view.get("_game")
+	game.board = ChessBoard.new("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1")
+	_board.call("show_position", game.board)
+	_click(_square_pos("a1"))
+	_click(_square_pos("a8"))
+
+
+func _stage_mate_trap() -> bool:
+	var game = _view.get("_game")
+	_ck_true("the mate ends the game", bool(game.over))
+	_ck_true("...but the end card waits while the mate is shown", _view.get("_endcard") == null)
+	var trap: Array = _board.get("_trap")
+	_ck("every square round the king is part of the trap", trap.size(), 5)
+	var explain: Label = _view.get("_explain")
+	_ck_true("the panel says how the trap is made", explain.text.begins_with(
+			"Checkmate! Your rook on a8 attacks their king straight along the row. It is a trap:"))
+	print("      panel: ", explain.text)
+	_shot("06h_mate_trap")
+	_wait(1000)
+	return false
+
+
+func _stage_mate_party() -> bool:
+	_ck_true("a mate the player gave is celebrated", (_board.get("_confetti") as Array).size() > 0)
+	_ck_true("...still before the end card", _view.get("_endcard") == null)
+	_shot("06i_mate_celebration")
+	_wait(4500)
+	return false
+
+
+func _stage_mate_card() -> bool:
+	_ck_true("after the dwell, the end card", _view.get("_endcard") != null)
+	_shot("06j_mate_card")
+	# The card's veil is freed at the end of the frame and would swallow a
+	# click made now: the next mate is played in the next stage.
+	_view.call("_start_game")
+	_wait(200)
+	return false
+
+
+func _stage_mate_again() -> bool:
+	_play_mate()
+	# Past MATE_SKIP_AFTER, which counts from when the move LANDS.
+	_wait(1400)
+	return false
+
+
+func _stage_mate_skip() -> bool:
+	_ck_true("a second mate: no card yet", _view.get("_endcard") == null)
+	_click(_square_pos("d4"))
+	_wait(200)
+	return false
+
+
+func _stage_mate_skipped() -> bool:
+	_ck_true("a tap skips straight to the end card", _view.get("_endcard") != null)
+	_view.call("_start_game")
+	_wait(200)
 	return false
 
 
@@ -452,6 +584,7 @@ func _stage_training_off() -> bool:
 	_view.set("_pref_train_attack", _saved_training[2])
 	_view.set("_pref_train_hover", _saved_training[3])
 	_view.set("_pref_train_chains", _saved_training[4])
+	_view.set("_pref_train_checks", _saved_training[5])
 	_view.call("_save_prefs")
 	_board.call("clear_selection")
 	_wait(120)

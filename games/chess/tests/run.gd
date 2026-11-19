@@ -40,6 +40,7 @@ func _initialize() -> void:
 	_test_piece_set_files()
 	_test_danger_squares()
 	_test_take_chains()
+	_test_check_why()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -1131,3 +1132,97 @@ func _test_take_chains() -> void:
 			froms.call(pinned.take_chain(sq.call("e4"))), ["d5"])
 	_eq("kings are never put in a chain as the target",
 			B.new("4k3/8/8/8/8/8/3q4/4K3 w - - 0 1").take_chain(sq.call("e1")), {})
+
+
+func _test_check_why() -> void:
+	## Why the king is in check, and the ways out, as training mode tells it.
+	var names := func(squares: PackedInt32Array) -> Array:
+		var out: Array = []
+		for s in squares:
+			out.append(B.square_name(s))
+		out.sort()
+		return out
+
+	_eq("no check, nothing to explain", B.new().check_info(), {})
+	_eq("...and no words", ChessBoardView.explain_check(B.new(), {}, B.WHITE), "")
+
+	# b4 bishop checks e1 down the diagonal; the b1 knight can block on c3 or
+	# d2, the a3 pawn can take.
+	var bishop := B.new("4k3/8/8/8/1b6/P7/8/1N2K3 w - - 0 1")
+	var fen_before: String = bishop.fen()
+	var i1: Dictionary = bishop.check_info()
+	var c1: Dictionary = i1["checkers"][0]
+	_eq("one checker, the bishop", [(i1["checkers"] as Array).size(), B.square_name(int(c1["from"]))], [1, "b4"])
+	_eq("...its line runs from it to the king", Array(c1["line"]).map(func(q: int) -> String: return B.square_name(q)), ["c3", "d2"])
+	_eq("...the knight can block on either", names.call(i1["blocks"]), ["c3", "d2"])
+	_eq("...the pawn can take it", names.call(i1["takers"]), ["a3"])
+	_eq("...the king can step off the line, not along it", names.call(i1["king_moves"]), ["d1", "e2", "f1", "f2"])
+	_eq("...and working it out changes nothing", bishop.fen(), fen_before)
+	var t1: String = ChessBoardView.explain_check(bishop, i1, B.WHITE)
+	_check("the words say who and how", t1.begins_with("Their bishop on b4 attacks your king along the diagonal."))
+	_check("...and each way out", t1.contains("move your king (4 squares)") and t1.contains("block on")
+			and t1.contains("take the bishop with your pawn"))
+	print("      ", t1)
+	_check("the checker's side hears it as theirs to answer",
+			ChessBoardView.explain_check(bishop, i1, B.BLACK).begins_with(
+			"Your bishop on b4 attacks their king along the diagonal. They have to answer it:"))
+
+	var knight := B.new("4k3/8/8/8/8/5n2/8/4K3 w - - 0 1")
+	var i2: Dictionary = knight.check_info()
+	_eq("a knight's check has no line to block", [(i2["checkers"][0]["line"] as PackedInt32Array).size(),
+			(i2["blocks"] as PackedInt32Array).size()], [0, 0])
+	_check("...and the words say so", ChessBoardView.explain_check(knight, i2, B.WHITE)
+			.contains("A knight jumps, so it cannot be blocked."))
+
+	var double := B.new("4k3/8/8/8/8/5n2/8/r3K3 w - - 0 1")
+	var i3: Dictionary = double.check_info()
+	_eq("double check: two checkers", (i3["checkers"] as Array).size(), 2)
+	_eq("...no block and no take can answer both", [(i3["blocks"] as PackedInt32Array).size(),
+			(i3["takers"] as PackedInt32Array).size()], [0, 0])
+	_eq("...only these king steps", names.call(i3["king_moves"]), ["e2", "f2"])
+	var t3: String = ChessBoardView.explain_check(double, i3, B.WHITE)
+	_check("...and the words say only the king can", t3.begins_with("Double check!")
+			and t3.contains("Only the king can get out of a double check: move your king to "))
+
+	# The e2 knight could block on c3, but the e7 rook pins it to the king.
+	var pinned := B.new("7k/4r3/8/8/1b6/8/4N3/4K3 w - - 0 1")
+	_eq("a pinned piece cannot block", (pinned.check_info()["blocks"] as PackedInt32Array).size(), 0)
+
+	var queen := B.new("4k3/8/8/8/8/8/3q4/4K3 w - - 0 1")
+	_eq("the king taking an unguarded checker is a way out, said as a take",
+			ChessBoardView.explain_check(queen, queen.check_info(), B.WHITE),
+			"Their queen on d2 attacks your king along the diagonal. "
+			+ "Ways out: move your king to f1, or take the queen with your king.")
+
+	var ep := B.new("4k3/8/8/3pP3/4K3/8/8/8 w - d6 0 1")
+	_eq("a checking pawn can be taken en passant", names.call(ep.check_info()["takers"]), ["e5"])
+	_check("...and its check is a pawn's", ChessBoardView.explain_check(ep, ep.check_info(), B.WHITE)
+			.contains("attacks your king diagonally, one step away"))
+
+	var rook := B.new("R5k1/5ppp/8/8/8/8/8/6K1 b - - 0 1")
+	var t5: String = ChessBoardView.explain_check(rook, rook.check_info(), B.BLACK)
+	_eq("a back-rank mate is told as the trap it is", t5,
+			"Checkmate! Their rook on a8 attacks your king straight along the row. It is a trap: "
+			+ "their rook on a8 covers f8 and h8, your own pawns fill f7, g7 and h7, "
+			+ "and nothing can block the rook or take it.")
+	var trap: Dictionary = {}
+	for e: Dictionary in rook.king_trap():
+		trap[B.square_name(int(e["sq"]))] = "own" if bool(e["own"]) else names.call(e["guards"])
+	_eq("the trap: h8 is covered too, behind the king on the rook's line",
+			trap, {"f8": ["a8"], "h8": ["a8"], "f7": "own", "g7": "own", "h7": "own"})
+	_eq("...and working it out changes nothing", rook.fen(), "R5k1/5ppp/8/8/8/8/8/6K1 b - - 0 1")
+
+	# Smothered: the knight checks, the king's own pieces fill every square.
+	var smothered := B.new("6rk/5Npp/8/8/8/8/8/6K1 b - - 0 1")
+	_eq("a smothered mate: the king's own pieces are the trap",
+			ChessBoardView.explain_check(smothered, smothered.check_info(), B.WHITE),
+			"Checkmate! Your knight on f7 attacks their king with a knight's jump. "
+			+ "A knight jumps, so it cannot be blocked. It is a trap: their own pieces fill g7, g8 "
+			+ "and h7, and nothing can take the knight.")
+	var protected := B.new("6k1/6Q1/5B2/8/8/8/8/6K1 b - - 0 1")
+	var pt: Dictionary = {}
+	for e: Dictionary in protected.king_trap():
+		pt[B.square_name(int(e["sq"]))] = names.call(e["guards"])
+	_eq("a protected checker: the king cannot take it", pt["g7"], ["f6"])
+	_check("...and the words say who covers what", ChessBoardView.explain_check(
+			protected, protected.check_info(), B.WHITE).contains("your bishop on f6 covers g7"))

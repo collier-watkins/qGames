@@ -83,6 +83,8 @@ var _btn_training: Button = null
 var _review_ply: int = -1
 var _promo_from: int = -1
 var _promo_to: int = -1
+## A checkmate is being shown on the board; the end card waits for it.
+var _mate_pending: bool = false
 
 var _pref_side: int = 1          ## +1 white, -1 black, 0 random
 var _pref_level: int = DEFAULT_LEVEL
@@ -98,6 +100,7 @@ var _pref_train_danger: bool = true
 var _pref_train_attack: bool = true
 var _pref_train_hover: bool = true
 var _pref_train_chains: bool = true
+var _pref_train_checks: bool = true
 var _explain: Label = null
 
 
@@ -222,6 +225,7 @@ func _load_prefs() -> void:
 	_pref_train_attack = bool(QConfig.get_value("chess/training_attack", true))
 	_pref_train_hover = bool(QConfig.get_value("chess/training_hover_only", true))
 	_pref_train_chains = bool(QConfig.get_value("chess/training_chains", true))
+	_pref_train_checks = bool(QConfig.get_value("chess/training_checks", true))
 
 
 func _save_prefs() -> void:
@@ -238,6 +242,7 @@ func _save_prefs() -> void:
 	QConfig.set_value("chess/training_attack", _pref_train_attack)
 	QConfig.set_value("chess/training_hover_only", _pref_train_hover)
 	QConfig.set_value("chess/training_chains", _pref_train_chains)
+	QConfig.set_value("chess/training_checks", _pref_train_checks)
 	QConfig.save()
 
 
@@ -262,7 +267,8 @@ func _build_ui() -> void:
 	print("chess: pieces from ", _board_view.art.source)
 	_board_view.move_attempted.connect(_on_move_attempted)
 	_board_view.square_touched.connect(_on_square_touched)
-	_board_view.chain_explained.connect(_on_chain_explained)
+	_board_view.explained.connect(_on_explained)
+	_board_view.mate_done.connect(_on_mate_done)
 	add_child(_board_view)
 
 	_panel = PanelContainer.new()
@@ -435,6 +441,7 @@ func _relayout() -> void:
 # ------------------------------------------------------------------ new game
 
 func _show_setup() -> void:
+	_mate_pending = false
 	_arm_layout()
 	if _setup != null:
 		_setup.queue_free()
@@ -701,6 +708,7 @@ func _start_game() -> void:
 	_clear_overlay("_setup")
 	_clear_overlay("_endcard")
 	_clear_overlay("_promo")
+	_mate_pending = false
 	_refresh_moves()
 	_refresh_names()
 	_update_status()
@@ -749,12 +757,20 @@ func _process(delta: float) -> void:
 			_update_status()
 
 
+## How long the computer holds its reply to a check the player gave, with the
+## why-check aid on, on top of its usual thinking floor. Its clock runs meanwhile.
+const CHECK_HOLD_MS: int = 3000
+
+
 func _maybe_think() -> void:
 	if _game.over or _game.is_human_turn():
 		_update_status()
 		return
 	_board_view.clear_hint()
-	_opponent.think(_game.board, _game.board.repetition_counts())
+	# The player has just given check. The computer's answer would wipe the
+	# picture of why within half a second, so it waits long enough to read it.
+	var hold: int = CHECK_HOLD_MS if _explaining_checks() and _game.board.in_check() else 0
+	_opponent.think(_game.board, _game.board.repetition_counts(), hold)
 	_update_status()
 
 
@@ -837,13 +853,30 @@ func _cue_after(seconds: float, cue: String) -> void:
 
 func _on_game_over() -> void:
 	_board_view.interactive = false
+	# Checkmate is dwelt on: the trap, the king going over, and for a win the
+	# confetti, before the card covers the board. The result's sound waits for
+	# the king to fall.
+	var mate: bool = _game.board.status() == B.CHECKMATE
+	var cue_at: float = ChessBoardView.MATE_TOPPLE_AT + 0.2 if mate else RESULT_CUE_DELAY
 	match _game.telemetry_result():
-		"win": _cue_after(RESULT_CUE_DELAY, ChessAudio.WIN)
-		"loss": _cue_after(RESULT_CUE_DELAY, ChessAudio.LOSS)
-		"draw": _cue_after(RESULT_CUE_DELAY, ChessAudio.DRAW)
+		"win": _cue_after(cue_at, ChessAudio.WIN)
+		"loss": _cue_after(cue_at, ChessAudio.LOSS)
+		"draw": _cue_after(cue_at, ChessAudio.DRAW)
 	_publish(_game)
-	_show_endcard()
+	if mate:
+		_mate_pending = true
+		_board_view.celebrate_mate(_game.telemetry_result() == "win")
+	else:
+		_show_endcard()
 	_update_status()
+
+
+func _on_mate_done() -> void:
+	if not _mate_pending:
+		return
+	_mate_pending = false
+	if _game != null and _game.over and _setup == null:
+		_show_endcard()
 
 
 # --------------------------------------------------------------- promotion
@@ -1074,11 +1107,11 @@ func _update_status() -> void:
 	if _game.over:
 		_status.text = _game.termination
 		return
-	if _opponent.is_thinking():
-		_status.text = "Thinking" + ".".repeat(1 + int(_thinking_dots / 0.5))
-		return
 	if _game.board.in_check():
 		_status.text = "Check!" if _game.is_human_turn() else "You have given check"
+		return
+	if _opponent.is_thinking():
+		_status.text = "Thinking" + ".".repeat(1 + int(_thinking_dots / 0.5))
 		return
 	_status.text = "Your move" if _game.is_human_turn() else "Computer's move"
 
@@ -1097,11 +1130,15 @@ func _apply_training() -> void:
 	var chains: bool = _pref_training and _pref_train_chains
 	_board_view.set_training(_game.human_side if danger else 0,
 			_game.human_side if attack else 0, _pref_train_hover,
-			_game.human_side if chains else 0)
+			_game.human_side if chains else 0, _explaining_checks())
 	_refresh_training_button()
 
 
-func _on_chain_explained(text: String) -> void:
+func _explaining_checks() -> bool:
+	return _pref_training and _pref_train_checks
+
+
+func _on_explained(text: String) -> void:
 	_explain.text = text
 	_explain.visible = text != ""
 
@@ -1159,41 +1196,50 @@ func _show_training() -> void:
 	var danger := _training_switch("Danger squares", _pref_train_danger)
 	var danger_cell := _training_cell(aids)
 	danger_cell.add_child(danger)
-	var danger_why := _make_label("Red: where the computer's pieces could take yours. "
-			+ "A red dot means that move lets your piece be taken.", 15, C_DIM)
+	var danger_why := _make_label("Red: where the computer could take your pieces. "
+			+ "A red dot: that move gets taken.", 15, C_DIM)
 	danger_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	danger_why.custom_minimum_size = Vector2(340, 0)
 	danger_cell.add_child(danger_why)
 	var attack := _training_switch("Attack squares", _pref_train_attack)
 	var attack_cell := _training_cell(aids)
 	attack_cell.add_child(attack)
-	var attack_why := _make_label("Blue: where your pieces could take the computer's. "
-			+ "Half and half: both sides can take there.", 15, C_DIM)
+	var attack_why := _make_label("Blue: where you could take the computer's pieces. "
+			+ "Half and half: both can.", 15, C_DIM)
 	attack_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	attack_why.custom_minimum_size = Vector2(340, 0)
 	attack_cell.add_child(attack_why)
 	var hover := _training_switch("Only the piece I point at", _pref_train_hover)
 	var hover_cell := _training_cell(aids)
 	hover_cell.add_child(hover)
-	var hover_why := _make_label("Point at a piece, or tap it, to see the squares it "
-			+ "can take on. Off: every square is shown all the time.", 15, C_DIM)
+	var hover_why := _make_label("Point at or tap a piece to see its squares. "
+			+ "Off: all shown, all the time.", 15, C_DIM)
 	hover_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hover_why.custom_minimum_size = Vector2(340, 0)
 	hover_cell.add_child(hover_why)
 	var chains := _training_switch("Take chains", _pref_train_chains)
 	var chains_cell := _training_cell(aids)
 	chains_cell.add_child(chains)
-	var chains_why := _make_label("A ! marks your pieces in danger. Point at a piece to see "
-			+ "who would take it, in order. Faded: nobody sensible goes that far.", 15, C_DIM)
+	var chains_why := _make_label("! marks your pieces in danger. Point at one to see "
+			+ "who takes it, in order.", 15, C_DIM)
 	chains_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	chains_why.custom_minimum_size = Vector2(340, 0)
 	chains_cell.add_child(chains_why)
+	var checks := _training_switch("Why check", _pref_train_checks)
+	var checks_cell := _training_cell(aids)
+	checks_cell.add_child(checks)
+	var checks_why := _make_label("An arrow shows what attacks the king; the panel "
+			+ "says how to get out.", 15, C_DIM)
+	checks_why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	checks_why.custom_minimum_size = Vector2(340, 0)
+	checks_cell.add_child(checks_why)
 
 	var dim_aids := func() -> void:
 		danger.disabled = not _pref_training
 		attack.disabled = not _pref_training
 		hover.disabled = not _pref_training
 		chains.disabled = not _pref_training
+		checks.disabled = not _pref_training
 		aids.modulate.a = 1.0 if _pref_training else 0.45
 	dim_aids.call()
 
@@ -1216,6 +1262,10 @@ func _show_training() -> void:
 		_apply_training())
 	chains.toggled.connect(func(on: bool) -> void:
 		_pref_train_chains = on
+		_save_prefs()
+		_apply_training())
+	checks.toggled.connect(func(on: bool) -> void:
+		_pref_train_checks = on
 		_save_prefs()
 		_apply_training())
 

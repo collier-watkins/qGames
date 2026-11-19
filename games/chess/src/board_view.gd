@@ -14,9 +14,14 @@ extends Control
 
 signal move_attempted(from_sq: int, to_sq: int)
 signal square_touched(sq: int)
-## Training mode's take chain, in words, for the piece being pointed at — or ""
-## when there is none. The panel shows it; the board only has room for arrows.
-signal chain_explained(text: String)
+## Training mode's words for what the board is showing — why a king is in
+## check and the ways out, then the take chain of the piece being pointed at —
+## or "" when there is nothing. The panel shows it; the board only has room
+## for arrows.
+signal explained(text: String)
+## The checkmate has been dwelt on long enough (or the player tapped past it):
+## time for the end card.
+signal mate_done
 
 const B := preload("res://src/board.gd")
 
@@ -121,6 +126,24 @@ var chains_for: int = 0
 var _in_danger: Dictionary = {}
 var _chain: Dictionary = {}
 var _chain_text: String = ""
+## Training mode, why check: while a king is in check, the checker is ringed,
+## an arrow runs from it to the king over its line of attack, and the panel
+## gets the reason and the ways out (ChessBoard.check_info). Either side's
+## check: the one the player gives teaches as much as the one they get.
+var checks_on: bool = false
+var _check: Dictionary = {}
+var _check_text: String = ""
+var _explained: String = ""
+## On checkmate, the squares round the mated king and what holds each one
+## (ChessBoard.king_trap): drawn as the net the king is caught in.
+var _trap: Array = []
+## The checkmate show: seconds since the mating move landed, or -1. The trap
+## is shown first, then the mated king topples and, when the player won,
+## confetti flies; mate_done is sent at MATE_DWELL or on a tap.
+var _mate_t: float = -1.0
+var _mate_win: bool = false
+var _mate_sent: bool = false
+var _confetti: Array = []
 var cursor: int = 4
 var show_cursor: bool = false
 
@@ -162,6 +185,9 @@ func _init() -> void:
 
 func show_position(b: ChessBoard, from_sq: int = -1, to_sq: int = -1) -> void:
 	board = b
+	_mate_t = -1.0
+	_mate_sent = false
+	_confetti.clear()
 	last_from = from_sq
 	last_to = to_sq
 	_slides.clear()
@@ -174,11 +200,12 @@ func show_position(b: ChessBoard, from_sq: int = -1, to_sq: int = -1) -> void:
 
 
 func set_training(danger_side: int, attack_side: int, only_pointed: bool,
-		chains_side: int = 0) -> void:
+		chains_side: int = 0, explain_checks: bool = false) -> void:
 	danger_for = danger_side
 	attack_for = attack_side
 	hover_only = only_pointed
 	chains_for = chains_side
+	checks_on = explain_checks
 	_refresh_maps()
 	_refresh_hanging()
 	queue_redraw()
@@ -204,6 +231,16 @@ func _refresh_maps(position_changed: bool = true) -> void:
 		_in_danger = {}
 		if board != null and chains_for != 0:
 			_in_danger = board.pieces_in_danger(chains_for)
+		_check = {}
+		_check_text = ""
+		_trap = []
+		# A checkmate is always shown as the trap it is, aid or not: it is the
+		# one position every player should be able to read.
+		if board != null and (checks_on or _mate_t >= 0.0):
+			_check = board.check_info()
+			_check_text = explain_check(board, _check, _human_side())
+			if _is_stuck():
+				_trap = board.king_trap()
 	_refresh_chain()
 	if board == null:
 		return
@@ -227,10 +264,57 @@ func _refresh_chain() -> void:
 	_chain = {}
 	if board != null and chains_for != 0 and _inspect >= 0 and board.board[_inspect] != 0:
 		_chain = board.take_chain(_inspect)
-	var text: String = explain_chain(board, _inspect, _chain, chains_for)
-	if text != _chain_text:
-		_chain_text = text
-		chain_explained.emit(text)
+	_chain_text = explain_chain(board, _inspect, _chain, chains_for)
+	var parts: PackedStringArray = PackedStringArray()
+	for t: String in [_check_text, _chain_text]:
+		if t != "":
+			parts.append(t)
+	var text: String = "\n\n".join(parts)
+	if text != _explained:
+		_explained = text
+		explained.emit(text)
+
+
+func _is_stuck() -> bool:
+	return not _check.is_empty() \
+			and (_check["king_moves"] as PackedInt32Array).is_empty() \
+			and (_check["blocks"] as PackedInt32Array).is_empty() \
+			and (_check["takers"] as PackedInt32Array).is_empty()
+
+
+func celebrate_mate(player_won: bool) -> void:
+	## Called once the game has ended in checkmate, after the mating move was
+	## shown. The end card waits for mate_done.
+	_mate_win = player_won
+	_mate_t = 0.0
+	_mate_sent = false
+	_confetti.clear()
+	_refresh_maps()
+	set_process(true)
+	queue_redraw()
+
+
+func is_celebrating() -> bool:
+	return _mate_t >= 0.0 and not _mate_sent
+
+
+func _finish_mate() -> void:
+	if _mate_sent:
+		return
+	_mate_sent = true
+	# Skipped early: the king is shown already down.
+	_mate_t = maxf(_mate_t, MATE_TOPPLE_AT + MATE_TOPPLE_SEC)
+	queue_redraw()
+	mate_done.emit()
+
+
+func _human_side() -> int:
+	## Whose point of view the words take. The training aids are all set for
+	## the player's side; with chains off, the side at the bottom of the board.
+	for s: int in [chains_for, danger_for, attack_for]:
+		if s != 0:
+			return s
+	return B.BLACK if flipped else B.WHITE
 
 
 const PIECE_NAMES: Array[String] = ["", "pawn", "knight", "bishop", "rook", "queen", "king"]
@@ -270,6 +354,174 @@ static func explain_chain(b: ChessBoard, sq: int, chain: Dictionary, me: int) ->
 	else:
 		ending = "You lose %s." % _points(worth)
 	return "%s%s: %s. %s" % [owner, what, ", then ".join(parts), ending]
+
+
+const LINE_WORDS: Dictionary = {
+	B.PAWN: "diagonally, one step away",
+	B.KNIGHT: "with a knight's jump",
+}
+
+
+static func explain_check(b: ChessBoard, info: Dictionary, me: int) -> String:
+	## Why the king is in check, and what can be done about it, in words a
+	## child can be read: who attacks the king and how, then the ways out by
+	## kind. Squares are named, because the board shows their letters and
+	## numbers along its edges.
+	if b == null or info.is_empty():
+		return ""
+	var mine: bool = b.side == me
+	var whose_king: String = "your king" if mine else "their king"
+	var their: String = "their" if mine else "your"
+	var found: Array = info["checkers"]
+	var names: PackedStringArray = PackedStringArray()
+	for c: Dictionary in found:
+		names.append("%s %s on %s" % [their, PIECE_NAMES[absi(int(c["piece"]))],
+				B.square_name(int(c["from"]))])
+	var text: String
+	if found.size() > 1:
+		text = "Double check! %s and %s both attack %s." % [
+				_cap(names[0]), names[1], whose_king]
+	else:
+		var c0: Dictionary = found[0]
+		# No "Check!" in front: the status line right above already says it.
+		text = "%s attacks %s %s." % [_cap(names[0]), whose_king,
+				_how_it_attacks(b, int(c0["piece"]), int(c0["from"]), int(info["king"]))]
+		if absi(int(c0["piece"])) == B.KNIGHT:
+			text += " A knight jumps, so it cannot be blocked."
+	var ways: String = _ways_out(b, info, mine)
+	if ways != "":
+		return text + " " + ways
+	# No way out. Say what the trap is made of, square by square.
+	text = "Checkmate! " + text.trim_prefix("Double check! ")
+	return text + " " + _trap_words(b, found, mine)
+
+
+static func _trap_words(b: ChessBoard, found: Array, mine: bool) -> String:
+	var their: String = "their" if mine else "your"
+	var by_guard: Dictionary = {}
+	var own_sqs: PackedStringArray = PackedStringArray()
+	var own_types: Dictionary = {}
+	for e: Dictionary in b.king_trap():
+		var name: String = B.square_name(int(e["sq"]))
+		if bool(e["own"]):
+			own_sqs.append(name)
+			own_types[absi(b.board[int(e["sq"])])] = true
+			continue
+		var guards: PackedInt32Array = e["guards"]
+		if guards.is_empty():
+			continue
+		# Array, not PackedStringArray: a packed array is copied on the way out
+		# of the Dictionary, and appending to the copy is lost.
+		if not by_guard.has(guards[0]):
+			by_guard[guards[0]] = []
+		(by_guard[guards[0]] as Array).append(name)
+	var clauses: PackedStringArray = PackedStringArray()
+	for g: int in by_guard:
+		var sqs := PackedStringArray(by_guard[g])
+		sqs.sort()
+		clauses.append("%s %s on %s covers %s" % [their, PIECE_NAMES[absi(b.board[g])],
+				B.square_name(g), _and_list(sqs)])
+	if not own_sqs.is_empty():
+		own_sqs.sort()
+		var what: String = "pieces"
+		if own_types.size() == 1:
+			what = PIECE_NAMES[int(own_types.keys()[0])] + ("s" if own_sqs.size() > 1 else "")
+		elif own_sqs.size() == 1:
+			what = "piece"
+		clauses.append("%s own %s %s %s" % ["your" if mine else "their", what,
+				"fills" if own_sqs.size() == 1 else "fill", _and_list(own_sqs)])
+	if found.size() > 1:
+		clauses.append("no one move answers two checks")
+	else:
+		var checker: String = PIECE_NAMES[absi(int(found[0]["piece"]))]
+		if (found[0]["line"] as PackedInt32Array).is_empty():
+			clauses.append("nothing can take the %s" % checker)
+		else:
+			clauses.append("nothing can block the %s or take it" % checker)
+	var last: String = clauses[clauses.size() - 1]
+	var head: PackedStringArray = clauses.slice(0, clauses.size() - 1)
+	return "It is a trap: %s, and %s." % [", ".join(head), last] if not head.is_empty() \
+			else "It is a trap: %s." % last
+
+
+static func _and_list(items: PackedStringArray) -> String:
+	if items.size() <= 1:
+		return "".join(items)
+	return ", ".join(items.slice(0, items.size() - 1)) + " and " + items[items.size() - 1]
+
+
+static func _how_it_attacks(b: ChessBoard, piece: int, from: int, king: int) -> String:
+	var type: int = absi(piece)
+	if LINE_WORDS.has(type):
+		return LINE_WORDS[type]
+	if B.file_of(from) == B.file_of(king):
+		return "straight along the column"
+	if B.rank_of(from) == B.rank_of(king):
+		return "straight along the row"
+	return "along the diagonal"
+
+
+static func _ways_out(b: ChessBoard, info: Dictionary, mine: bool) -> String:
+	var found: Array = info["checkers"]
+	var your: String = "your" if mine else "their"
+	var checker_at: Dictionary = {}
+	for c: Dictionary in found:
+		checker_at[int(c["from"])] = absi(int(c["piece"]))
+	var options: PackedStringArray = PackedStringArray()
+	# The king taking a checker is a take, not a step: said that way it is the
+	# same idea as any other piece taking it.
+	var steps: PackedStringArray = PackedStringArray()
+	var king_takes: Array[int] = []
+	for t: int in info["king_moves"]:
+		if checker_at.has(t):
+			king_takes.append(int(checker_at[t]))
+		else:
+			steps.append(B.square_name(t))
+	if not steps.is_empty():
+		options.append("move %s king to %s" % [your, _or_list(steps)] if steps.size() <= 3
+				else "move %s king (%d squares)" % [your, steps.size()])
+	var blocks: PackedStringArray = PackedStringArray()
+	for t: int in info["blocks"]:
+		blocks.append(B.square_name(t))
+	if not blocks.is_empty():
+		options.append("block on %s" % _or_list(blocks))
+	if found.size() == 1:
+		var taker_names: PackedStringArray = PackedStringArray()
+		for f: int in info["takers"]:
+			var n: String = PIECE_NAMES[absi(b.board[f])]
+			if not taker_names.has(n):
+				taker_names.append(n)
+		if not king_takes.is_empty():
+			taker_names.append("king")
+		if not taker_names.is_empty():
+			options.append("take the %s with %s %s" % [
+					PIECE_NAMES[absi(int(found[0]["piece"]))], your, _or_list(taker_names)])
+	else:
+		for type: int in king_takes:
+			options.append("take the %s with %s king" % [PIECE_NAMES[type], your])
+	if options.is_empty():
+		return ""
+	if found.size() > 1:
+		return "Only the king can get out of a double check: %s." % _options(options)
+	return ("Ways out: " if mine else "They have to answer it: ") + _options(options) + "."
+
+
+static func _options(items: PackedStringArray) -> String:
+	## The ways out, comma before the last "or": an option can hold an "or" of
+	## its own ("block on c3 or d2"), and without it the sentence runs together.
+	if items.size() <= 1:
+		return "".join(items)
+	return ", ".join(items.slice(0, items.size() - 1)) + ", or " + items[items.size() - 1]
+
+
+static func _cap(text: String) -> String:
+	return text.substr(0, 1).to_upper() + text.substr(1)
+
+
+static func _or_list(items: PackedStringArray) -> String:
+	if items.size() <= 1:
+		return "".join(items)
+	return ", ".join(items.slice(0, items.size() - 1)) + " or " + items[items.size() - 1]
 
 
 static func _points(n: int) -> String:
@@ -414,6 +666,22 @@ func _process(delta: float) -> void:
 		_select_t = minf(_select_t + step, 1.0) if want_select > 0.0 else maxf(_select_t - step, 0.0)
 		busy = true
 
+	if is_celebrating():
+		busy = true
+		# The clock starts once the mating move has landed.
+		if _slides.is_empty():
+			var before: float = _mate_t
+			_mate_t += delta
+			if _mate_win and before < MATE_TOPPLE_AT and _mate_t >= MATE_TOPPLE_AT:
+				_spawn_confetti()
+			if _mate_t >= MATE_DWELL:
+				_finish_mate()
+	elif _mate_t >= 0.0 and _mate_t < MATE_TOPPLE_AT + MATE_TOPPLE_SEC:
+		busy = true
+	if not _confetti.is_empty():
+		_step_confetti(delta)
+		busy = true
+
 	var checking: bool = board != null and board.in_check()
 	if checking:
 		_check_phase = fmod(_check_phase + delta / CHECK_PERIOD, 1.0)
@@ -487,6 +755,13 @@ func _gui_input(event: InputEvent) -> void:
 	# Not during a press: the piece being dragged stays the one looked at.
 	if event is InputEventMouseMotion and _press_sq < 0:
 		set_inspect(square_at(event.position))
+	if is_celebrating() and _mate_t >= MATE_SKIP_AFTER and (
+			(event is InputEventMouseButton and event.pressed)
+			or (event is InputEventScreenTouch and event.pressed)
+			or event.is_action_pressed("ui_accept")):
+		_finish_mate()
+		accept_event()
+		return
 	if not interactive:
 		return
 
@@ -676,9 +951,13 @@ func _draw() -> void:
 		if k >= 0:
 			var pulse: float = 0.5 + 0.5 * sin(_check_phase * TAU)
 			var kr: Rect2 = square_rect(k)
+			# A mated king's glow goes out as it topples: no king left standing there.
+			var lit: float = 1.0
+			if _mate_t >= 0.0:
+				lit = 1.0 - clampf((_mate_t - MATE_TOPPLE_AT) / MATE_TOPPLE_SEC, 0.0, 1.0)
 			draw_circle(kr.get_center(), _square * (0.50 + 0.04 * pulse),
-					Color(C_CHECK, 0.22 + 0.16 * pulse))
-			draw_circle(kr.get_center(), _square * 0.40, Color(C_CHECK, 0.38 + 0.14 * pulse))
+					Color(C_CHECK, (0.22 + 0.16 * pulse) * lit))
+			draw_circle(kr.get_center(), _square * 0.40, Color(C_CHECK, (0.38 + 0.14 * pulse) * lit))
 
 	if selected >= 0 and _select_t > 0.0:
 		var light_sel: bool = (B.file_of(selected) + B.rank_of(selected)) % 2 == 1
@@ -714,6 +993,8 @@ func _draw() -> void:
 			continue
 		if _dragging and sq == _drag_from:
 			continue
+		if sq == _mated_king():
+			continue
 		if _pops.has(sq):
 			_draw_piece_at(p, _pop_rect(square_rect(sq), float(_pops[sq])))
 		else:
@@ -732,10 +1013,13 @@ func _draw() -> void:
 				Rect2(a.position.lerp(b.position, k), a.size))
 
 	if hint_from >= 0 and hint_to >= 0:
-		_draw_arrow(square_rect(hint_from).get_center(), square_rect(hint_to).get_center())
+		_draw_arrow(_arrow_points(hint_from, hint_to))
 
+	_draw_mated_king()
 	_draw_danger_badges()
+	_draw_check_why()
 	_draw_chain()
+	_draw_mate_show()
 
 	if show_cursor:
 		var cr: Rect2 = square_rect(cursor)
@@ -824,6 +1108,10 @@ func _draw_danger_badges() -> void:
 	var font: Font = ThemeDB.fallback_font
 	var radius: float = _square * 0.15
 	var fs: int = int(maxf(9.0, _square * 0.24))
+	# Not while the check aid is up: the only thing to do then is get out of
+	# check, and the badges were a second set of red marks competing with it.
+	if not _check.is_empty():
+		return
 	for sq: int in _in_danger:
 		if _slides.size() > 0:
 			break
@@ -836,6 +1124,211 @@ func _draw_danger_badges() -> void:
 				radius * 2.0, fs, Color.WHITE)
 
 
+## Why check: the arrow from the checker to the king.
+const C_CHECK_ARROW: Color = Color(0.80, 0.12, 0.12, 0.92)
+## The ways out of check.
+const C_ESCAPE: Color = Color(0.10, 0.62, 0.28, 0.95)
+## Checkmate's net: the thin ring on a piece that helps the checker.
+const C_GUARD_LINE: Color = Color(0.80, 0.12, 0.12, 0.55)
+## The checkmate show's timing, in seconds after the mating move lands.
+const MATE_TOPPLE_AT: float = 1.4
+const MATE_TOPPLE_SEC: float = 0.7
+const MATE_SKIP_AFTER: float = 0.8
+const MATE_DWELL: float = 6.0
+const CONFETTI: Array[Color] = [Color(0.96, 0.26, 0.21), Color(1.0, 0.76, 0.03),
+		Color(0.30, 0.69, 0.31), Color(0.13, 0.59, 0.95), Color(0.61, 0.15, 0.69),
+		Color(1.0, 0.60, 0.0), Color(0.0, 0.74, 0.83)]
+
+
+func _draw_check_why() -> void:
+	## Over the pieces: an arrow from each checker to the king (an L for a
+	## knight), then the ways out or, on mate, the trap. Nothing else: the
+	## king's own glow already says "check", the panel names it, and a wash
+	## along the line, a box on the checker or a label over the king each
+	## repeated one of those and covered pieces doing it (gallery-checked,
+	## tests/gallery_checks.gd).
+	if _check.is_empty() or not _slides.is_empty():
+		return
+	var king: int = int(_check["king"])
+	var found: Array = _check["checkers"]
+	for c: Dictionary in found:
+		_draw_arrow_coloured(_arrow_points(int(c["from"]), king), C_CHECK_ARROW, 0.10)
+	if _is_stuck():
+		_draw_trap(found)
+	else:
+		_draw_escapes(found)
+
+
+func _draw_escapes(found: Array) -> void:
+	## The ways out, in green: a dot where the king can step (a ring where it
+	## steps by taking), a box on each square a block can go to, and an arrow
+	## from each piece that can take the checker.
+	var line_w: float = maxf(2.0, _square * 0.06)
+	for t: int in _check["king_moves"]:
+		var c: Vector2 = square_rect(t).get_center()
+		if board.board[t] != 0:
+			draw_arc(c, _square * 0.40, 0.0, TAU, 32, C_ESCAPE, _square * 0.07, true)
+		else:
+			draw_circle(c, _square * 0.15, C_ESCAPE)
+	for t: int in _check["blocks"]:
+		draw_rect(square_rect(t).grow(-_square * 0.12), C_ESCAPE, false, line_w)
+	if found.size() == 1:
+		var target: int = int(found[0]["from"])
+		for f: int in _check["takers"]:
+			_draw_arrow_coloured(_arrow_points(f, target), C_ESCAPE, 0.06)
+
+
+func _draw_trap(found: Array) -> void:
+	## Checkmate as the net it is. Every square round the king is closed: a
+	## red cross where an enemy piece covers it, an amber box where the
+	## king's own piece is in the way, and a thin ring on each enemy piece
+	## that helps the checker. No lines
+	## from guard to square: on a ladder or a queen mate they crossed the
+	## king and each other, and the panel already says who covers what.
+	var checker_sqs: Array[int] = []
+	for c: Dictionary in found:
+		checker_sqs.append(int(c["from"]))
+	var helpers: Dictionary = {}
+	var w: float = maxf(2.0, _square * 0.07)
+	for e: Dictionary in _trap:
+		var sq: int = int(e["sq"])
+		var r: Rect2 = square_rect(sq)
+		if bool(e["own"]):
+			draw_rect(r.grow(-_square * 0.08), C_BADGE_EVEN, false, maxf(2.0, _square * 0.05))
+			continue
+		var guards: PackedInt32Array = e["guards"]
+		if guards.is_empty():
+			continue
+		for g: int in guards:
+			if not checker_sqs.has(g):
+				helpers[g] = true
+		# An attacker standing next to the king, protected: no mark on it. A
+		# cross on the player's own piece read as "this piece is wrong"
+		# (owner, 2026-11-19); the ring on its protector says why the king
+		# cannot take it.
+		if board.board[sq] != 0:
+			continue
+		var c: Vector2 = r.get_center()
+		var a: float = _square * 0.20
+		draw_line(c + Vector2(-a, -a), c + Vector2(a, a), C_CHECK_ARROW, w, true)
+		draw_line(c + Vector2(-a, a), c + Vector2(a, -a), C_CHECK_ARROW, w, true)
+	for g: int in helpers:
+		draw_rect(square_rect(g).grow(-_square * 0.07), C_GUARD_LINE, false,
+				maxf(2.0, _square * 0.045))
+
+
+func _mated_king() -> int:
+	if _mate_t < 0.0 or board == null:
+		return -1
+	return board.king_sq[0 if board.side == B.WHITE else 1]
+
+
+func _draw_mated_king() -> void:
+	## The mated king tips over, away from the piece that mated it, pivoting
+	## on the edge of its base like a real piece pushed over.
+	var k: int = _mated_king()
+	if k < 0 or board.board[k] == 0:
+		return
+	var r: Rect2 = square_rect(k)
+	var u: float = clampf((_mate_t - MATE_TOPPLE_AT) / MATE_TOPPLE_SEC, 0.0, 1.0)
+	if u <= 0.0:
+		_draw_piece_at(board.board[k], r)
+		return
+	var dir: float = 1.0
+	if not _check.is_empty():
+		var from: Vector2 = square_rect(int(_check["checkers"][0]["from"])).get_center()
+		dir = -1.0 if from.x > r.get_center().x else 1.0
+	# A small bounce at the end, as it lands.
+	var k_ease: float = _ease_out(u)
+	var angle: float = dir * deg_to_rad(78.0) * k_ease
+	var pivot := Vector2(r.position.x + r.size.x * (0.5 + 0.28 * dir), r.end.y - r.size.y * 0.10)
+	draw_set_transform(pivot, angle, Vector2.ONE)
+	_draw_piece_at(board.board[k], Rect2(r.position - pivot, r.size))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_mate_show() -> void:
+	## The banner and the confetti, over everything else on the board.
+	for c: Dictionary in _confetti:
+		var life: float = float(c["life"])
+		var alpha: float = clampf(life / 0.5, 0.0, 1.0)
+		draw_set_transform(c["pos"], float(c["rot"]), Vector2.ONE)
+		var sz: Vector2 = c["size"]
+		# Flutter: the piece of paper turns edge-on and back.
+		sz.y *= absf(cos(float(c["flip"])))
+		draw_rect(Rect2(-sz * 0.5, sz), Color(c["colour"], alpha))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if not is_celebrating() or _mate_t < MATE_TOPPLE_AT:
+		return
+	var u: float = clampf((_mate_t - MATE_TOPPLE_AT) / 0.35, 0.0, 1.0)
+	var pop: float = _ease_out(u) + 0.12 * sin(PI * u)
+	var font: Font = ThemeDB.fallback_font
+	var fs: int = int(maxf(14.0, _square * 0.62 * pop))
+	var text: String = "Checkmate!"
+	var tw: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var sub: String = "You won!" if _mate_win else "The computer won"
+	var sfs: int = int(maxf(10.0, _square * 0.26 * pop))
+	var bw: float = maxf(tw, font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT, -1, sfs).x) + fs
+	var bh: float = fs * 1.25 + sfs * 1.6
+	# On the half of the board away from the mated king, so the trap stays in view.
+	var k: int = _mated_king()
+	var board_mid: float = _origin.y + _square * 4.0
+	var upper: bool = k >= 0 and square_rect(k).get_center().y > board_mid
+	var cy: float = _origin.y + _square * (2.0 if upper else 6.0)
+	var box := Rect2(Vector2(_origin.x + _square * 4.0 - bw * 0.5, cy - bh * 0.5), Vector2(bw, bh))
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(C_VERDICT_GOOD if _mate_win else C_BADGE_LOSE, 0.94)
+	sb.set_corner_radius_all(int(minf(bh * 0.3, 24.0)))
+	sb.border_color = Color(1, 1, 1, 0.9)
+	sb.set_border_width_all(int(maxf(2.0, _square * 0.04)))
+	draw_style_box(sb, box)
+	draw_string(font, Vector2(box.position.x, box.position.y + fs * 1.05), text,
+			HORIZONTAL_ALIGNMENT_CENTER, bw, fs, Color.WHITE)
+	draw_string(font, Vector2(box.position.x, box.position.y + fs * 1.25 + sfs * 1.05), sub,
+			HORIZONTAL_ALIGNMENT_CENTER, bw, sfs, Color(1, 1, 1, 0.92))
+
+
+func _spawn_confetti() -> void:
+	## Two bursts: one from the piece that gave mate, one from each top corner
+	## of the board, so it fills the board rather than one spot.
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var unit: float = _square / 64.0
+	var sources: Array = []
+	if not _check.is_empty():
+		sources.append([square_rect(int(_check["checkers"][0]["from"])).get_center(), 70, -PI * 0.5, PI * 0.9])
+	sources.append([_origin + Vector2(0, _square * 0.5), 45, -PI * 0.3, PI * 0.35])
+	sources.append([_origin + Vector2(_square * 8.0, _square * 0.5), 45, -PI * 0.7, PI * 0.35])
+	for src: Array in sources:
+		for i in int(src[1]):
+			var ang: float = float(src[2]) + rng.randf_range(-1.0, 1.0) * float(src[3])
+			var speed: float = rng.randf_range(260.0, 620.0) * unit
+			_confetti.append({
+				"pos": src[0], "vel": Vector2(cos(ang), sin(ang)) * speed,
+				"rot": rng.randf() * TAU, "spin": rng.randf_range(-9.0, 9.0),
+				"flip": rng.randf() * TAU, "flip_rate": rng.randf_range(6.0, 14.0),
+				"size": Vector2(rng.randf_range(7.0, 12.0), rng.randf_range(4.0, 7.0)) * unit,
+				"colour": CONFETTI[rng.randi() % CONFETTI.size()],
+				"life": rng.randf_range(2.2, 3.2)})
+
+
+func _step_confetti(delta: float) -> void:
+	var gravity: float = 820.0 * _square / 64.0
+	for i in range(_confetti.size() - 1, -1, -1):
+		var c: Dictionary = _confetti[i]
+		c["life"] = float(c["life"]) - delta
+		if float(c["life"]) <= 0.0:
+			_confetti.remove_at(i)
+			continue
+		var v: Vector2 = c["vel"]
+		v.y += gravity * delta
+		v *= pow(0.35, delta)  # air drag, so it drifts down rather than drops
+		c["vel"] = v
+		c["pos"] = (c["pos"] as Vector2) + v * delta
+		c["rot"] = float(c["rot"]) + float(c["spin"]) * delta
+		c["flip"] = float(c["flip"]) + float(c["flip_rate"]) * delta
+
+
 func _draw_chain() -> void:
 	## The pointed-at piece's take chain: an arrow from each taker to the
 	## square, a numbered disc on the taker giving the order, and the verdict
@@ -844,7 +1337,6 @@ func _draw_chain() -> void:
 		return
 	var steps: Array = _chain["steps"]
 	var played: int = int(_chain["played"])
-	var target: Vector2 = square_rect(_inspect).get_center()
 	var font: Font = ThemeDB.fallback_font
 	# Faded first so the steps that happen are drawn over them.
 	for pass_faded: bool in [true, false]:
@@ -856,8 +1348,7 @@ func _draw_chain() -> void:
 			var colour: Color = C_CHAIN_MINE if mine else C_CHAIN_THEIRS
 			if pass_faded:
 				colour.a = CHAIN_FADED
-			var from_pt: Vector2 = square_rect(from_sq).get_center()
-			_draw_arrow_coloured(from_pt, target, colour, 0.08)
+			_draw_arrow_coloured(_arrow_points(from_sq, _inspect), colour, 0.08)
 			var dr: Rect2 = square_rect(from_sq)
 			var disc: Vector2 = dr.position + Vector2(_square * 0.19, _square * 0.19)
 			var rad: float = _square * 0.16
@@ -888,11 +1379,15 @@ func _draw_verdict() -> void:
 	else:
 		text = "lose %d" % worth
 		colour = C_BADGE_LOSE
+	_draw_pill(_inspect, text, colour)
+
+
+func _draw_pill(sq: int, text: String, colour: Color) -> void:
 	var font: Font = ThemeDB.fallback_font
 	var fs: int = int(maxf(10.0, _square * 0.22))
 	var w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + fs * 0.9
 	var h: float = fs * 1.5
-	var r: Rect2 = square_rect(_inspect)
+	var r: Rect2 = square_rect(sq)
 	# Above the square, or below it on the top row; kept inside the board.
 	var y: float = r.position.y - h - _square * 0.04
 	if y < _origin.y:
@@ -907,23 +1402,50 @@ func _draw_verdict() -> void:
 			w, fs, Color.WHITE)
 
 
-func _draw_arrow_coloured(from: Vector2, to: Vector2, colour: Color, width: float) -> void:
-	## A slimmer arrow than the hint's, stopping short of the target's centre
-	## so several converging on one square do not bury the piece.
-	var dir: Vector2 = (to - from).normalized()
-	var head: float = _square * 0.24
-	var tip: Vector2 = to - dir * (_square * 0.30)
-	var shaft_end: Vector2 = tip - dir * head
-	draw_line(from + dir * (_square * 0.20), shaft_end, colour, _square * width, true)
-	var perp: Vector2 = Vector2(-dir.y, dir.x) * head * 0.55
+func _arrow_points(from_sq: int, to_sq: int) -> PackedVector2Array:
+	## Square centres for an arrow from one square to another. A knight's jump
+	## (only a knight moves 1x2) bends at a right angle like the classic L:
+	## the long leg first, then the short one into the target.
+	var a: Vector2 = square_rect(from_sq).get_center()
+	var b: Vector2 = square_rect(to_sq).get_center()
+	var df: int = absi((to_sq & 7) - (from_sq & 7))
+	var dr: int = absi((to_sq >> 4) - (from_sq >> 4))
+	if df * dr != 2:
+		return PackedVector2Array([a, b])
+	var corner: Vector2 = Vector2(b.x, a.y) if absf(b.x - a.x) > absf(b.y - a.y) else Vector2(a.x, b.y)
+	return PackedVector2Array([a, corner, b])
+
+
+func _draw_arrow_path(pts: PackedVector2Array, colour: Color, width: float, head: float,
+		head_half: float, start_trim: float, tip_trim: float) -> void:
+	## A straight arrow (2 points) or one with a single right-angle bend
+	## (3 points). The bent shaft is ONE polygon with a mitred corner, not two
+	## lines, so a translucent arrow has no darker overlap at the bend.
+	var last: int = pts.size() - 1
+	var d0: Vector2 = (pts[1] - pts[0]).normalized()
+	var d1: Vector2 = (pts[last] - pts[last - 1]).normalized()
+	var start: Vector2 = pts[0] + d0 * start_trim
+	var tip: Vector2 = pts[last] - d1 * tip_trim
+	var shaft_end: Vector2 = tip - d1 * head
+	if last == 1:
+		draw_line(start, shaft_end, colour, width, true)
+	else:
+		var c: Vector2 = pts[1]
+		var n0: Vector2 = Vector2(-d0.y, d0.x) * width * 0.5
+		var n1: Vector2 = Vector2(-d1.y, d1.x) * width * 0.5
+		draw_colored_polygon(PackedVector2Array([start + n0, c + n0 + n1, shaft_end + n1,
+				shaft_end - n1, c - n0 - n1, start - n0]), colour)
+	var perp: Vector2 = Vector2(-d1.y, d1.x) * head * head_half
 	draw_colored_polygon(PackedVector2Array([tip, shaft_end + perp, shaft_end - perp]), colour)
 
 
-func _draw_arrow(from: Vector2, to: Vector2) -> void:
-	var dir: Vector2 = (to - from).normalized()
-	var head: float = _square * 0.34
-	var tip: Vector2 = to - dir * (_square * 0.06)
-	var shaft_end: Vector2 = tip - dir * head
-	draw_line(from + dir * (_square * 0.18), shaft_end, C_HINT, _square * 0.13, true)
-	var perp: Vector2 = Vector2(-dir.y, dir.x) * head * 0.52
-	draw_colored_polygon(PackedVector2Array([tip, shaft_end + perp, shaft_end - perp]), C_HINT)
+func _draw_arrow_coloured(pts: PackedVector2Array, colour: Color, width: float) -> void:
+	## A slimmer arrow than the hint's, stopping short of the target's centre
+	## so several converging on one square do not bury the piece.
+	_draw_arrow_path(pts, colour, _square * width, _square * 0.24, 0.55,
+			_square * 0.20, _square * 0.30)
+
+
+func _draw_arrow(pts: PackedVector2Array) -> void:
+	_draw_arrow_path(pts, C_HINT, _square * 0.13, _square * 0.34, 0.52,
+			_square * 0.18, _square * 0.06)

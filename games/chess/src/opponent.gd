@@ -125,14 +125,16 @@ func try_external(configured_path: String = "") -> bool:
 	return true
 
 
-func think(board: ChessBoard, avoid_keys: Dictionary = {}) -> void:
+func think(board: ChessBoard, avoid_keys: Dictionary = {}, hold_ms: int = 0) -> void:
+	## `hold_ms` is added to the level's thinking floor, for a moment the
+	## player should be given time to look at.
 	if _thinking:
 		return
 	_thinking = true
 	_done = false
 	_result = 0
 	var cfg: Dictionary = level_config()
-	_ready_at_ms = Time.get_ticks_msec() + int(cfg["min_think_ms"])
+	_ready_at_ms = Time.get_ticks_msec() + int(cfg["min_think_ms"]) + hold_ms
 	_thread = Thread.new()
 	_thread.start(_worker.bind(board.fen(), avoid_keys.duplicate(), cfg))
 
