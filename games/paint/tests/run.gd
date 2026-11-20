@@ -32,6 +32,9 @@ func _initialize() -> void:
 	_test_resize_keeps_the_drawing()
 	_test_save_png()
 	_test_publish_png()
+	_test_shapes()
+	_test_constrain()
+	_test_pick_and_open()
 
 	print("")
 	print("%d passed, %d failed" % [_pass, _fail])
@@ -58,6 +61,88 @@ func _check_eq(name: String, got, want) -> void:
 
 func _same(a: Color, b: Color) -> bool:
 	return absf(a.r - b.r) < 0.01 and absf(a.g - b.g) < 0.01 and absf(a.b - b.b) < 0.01
+
+
+# ── shapes, dropper, open ──────────────────────────────────────────────────
+
+
+func _test_shapes() -> void:
+	var box: CanvasT = CanvasT.new(100, 80, Color.WHITE)
+	box.begin_stroke()
+	box.shape(CanvasT.Shape.RECT, Vector2i(20, 20), Vector2i(70, 60), 2, Color.RED)
+	box.end_stroke()
+	_check("a box marks its corners", _same(box.image.get_pixel(20, 20), Color.RED)
+			and _same(box.image.get_pixel(70, 60), Color.RED))
+	_check("and its sides", _same(box.image.get_pixel(45, 20), Color.RED)
+			and _same(box.image.get_pixel(70, 40), Color.RED))
+	_check("but is an outline, empty inside", _same(box.image.get_pixel(45, 40), Color.WHITE))
+	_check_eq("one shape is one undo step", box.history_steps(), 1)
+	# Outline only so the bucket can fill it: the inside is one closed region.
+	box.fill(Vector2i(45, 40), Color.BLUE)
+	_check("the bucket fills inside a box and stops at it",
+			_same(box.image.get_pixel(45, 40), Color.BLUE)
+			and _same(box.image.get_pixel(5, 5), Color.WHITE))
+
+	var oval: CanvasT = CanvasT.new(100, 80, Color.WHITE)
+	oval.shape(CanvasT.Shape.ELLIPSE, Vector2i(10, 10), Vector2i(90, 70), 2, Color.BLACK)
+	_check("an oval marks its rim at the ends of both axes",
+			_same(oval.image.get_pixel(10, 40), Color.BLACK)
+			and _same(oval.image.get_pixel(90, 40), Color.BLACK)
+			and _same(oval.image.get_pixel(50, 10), Color.BLACK)
+			and _same(oval.image.get_pixel(50, 70), Color.BLACK))
+	_check("not the box's corner", _same(oval.image.get_pixel(12, 12), Color.WHITE))
+	_check("and is empty in the middle", _same(oval.image.get_pixel(50, 40), Color.WHITE))
+	oval.fill(Vector2i(50, 40), Color.GREEN)
+	_check("an oval's rim is closed: a fill inside stays inside",
+			_same(oval.image.get_pixel(2, 2), Color.WHITE))
+
+	var line: CanvasT = CanvasT.new(100, 80, Color.WHITE)
+	line.shape(CanvasT.Shape.LINE, Vector2i(10, 10), Vector2i(90, 70), 1, Color.BLACK)
+	_check("a line joins its ends", _same(line.image.get_pixel(10, 10), Color.BLACK)
+			and _same(line.image.get_pixel(50, 40), Color.BLACK)
+			and _same(line.image.get_pixel(90, 70), Color.BLACK))
+
+
+func _test_constrain() -> void:
+	var a := Vector2i(10, 10)
+	_check_eq("Shift makes a box square, the longer side winning",
+			CanvasT.constrain(CanvasT.Shape.RECT, a, Vector2i(40, 20)), Vector2i(40, 40))
+	_check_eq("...in whichever direction it was dragged",
+			CanvasT.constrain(CanvasT.Shape.ELLIPSE, a, Vector2i(-20, 0)), Vector2i(-20, -20))
+	_check_eq("Shift snaps a nearly flat line flat",
+			CanvasT.constrain(CanvasT.Shape.LINE, a, Vector2i(60, 13)).y, 10)
+	var diag: Vector2i = CanvasT.constrain(CanvasT.Shape.LINE, a, Vector2i(50, 46))
+	_check_eq("...and a nearly diagonal one to 45 degrees", diag.x - a.x, diag.y - a.y)
+
+
+func _test_pick_and_open() -> void:
+	var c: CanvasT = CanvasT.new(64, 48, Color.WHITE)
+	c.dab(Vector2i(20, 20), 3, Color(0.2, 0.4, 0.6))
+	_check("the dropper reads the colour under it", _same(c.pick(Vector2i(20, 20)), Color(0.2, 0.4, 0.6)))
+	_check("and white off the paper", _same(c.pick(Vector2i(-5, 3)), Color.WHITE))
+
+	var saved := Image.create_empty(64, 48, false, Image.FORMAT_RGBA8)
+	saved.fill(Color.ORANGE)
+	var opened: CanvasT = CanvasT.new(64, 48, Color.WHITE)
+	opened.begin_stroke()
+	opened.dab(Vector2i(5, 5), 2, Color.BLACK)
+	opened.end_stroke()
+	_check("opening a picture replaces the paper", opened.load_picture(saved)
+			and _same(opened.image.get_pixel(40, 40), Color.ORANGE))
+	opened.undo()
+	_check("and is one Undo away from what was there",
+			_same(opened.image.get_pixel(40, 40), Color.WHITE)
+			and _same(opened.image.get_pixel(5, 5), Color.BLACK))
+
+	# A picture of another size is fitted, never adopted as a second image.
+	var big := Image.create_empty(128, 96, false, Image.FORMAT_RGB8)
+	big.fill(Color.PURPLE)
+	var fitted: CanvasT = CanvasT.new(64, 48, Color.WHITE)
+	var before: Image = fitted.image
+	fitted.load_picture(big)
+	_check("a picture of another size is fitted to the paper",
+			fitted.image.get_width() == 64 and _same(fitted.image.get_pixel(30, 30), Color.PURPLE))
+	_check("into the same one Image", fitted.image == before)
 
 
 # ── drawing ─────────────────────────────────────────────────────────────────

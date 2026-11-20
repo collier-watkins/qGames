@@ -37,6 +37,15 @@ func _initialize() -> void:
 		_stage_keys_take_over,
 		_stage_keys_drew,
 		_stage_mouse_back,
+		_stage_shape_press,
+		_stage_shape_drag,
+		_stage_shape_preview,
+		_stage_shape_landed,
+		_stage_dropper,
+		_stage_dropper_take,
+		_stage_dropped,
+		_stage_gallery,
+		_stage_opened,
 		_stage_done,
 	]
 
@@ -87,6 +96,15 @@ func _click(pos: Vector2) -> void:
 		e.position = pos
 		e.global_position = pos
 		Input.parse_input_event(e)
+
+
+func _button(pos: Vector2, down: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = down
+	e.position = _window(pos)
+	e.global_position = e.position
+	Input.parse_input_event(e)
 
 
 func _move(pos: Vector2) -> void:
@@ -142,6 +160,7 @@ func _stage_toolbar() -> bool:
 			one_line = false
 	_ck_true("the toolbar fits one line at 1024 wide", one_line)
 	_ck("eight size buttons, four round and four square", (_game.get("_size_buttons") as Array).size(), 8)
+	_ck("six tools: brush, fill, dropper, line, box, oval", (_game.get("_tool_buttons") as Array).size(), 6)
 	_shot("p1_toolbar")
 	_wait(200)
 	return false
@@ -223,6 +242,99 @@ func _stage_mouse_back() -> bool:
 	_ck("Space paints where the keys' pointer is", _pixel(Vector2i(600 + jump, 400)).to_html(false), "12c8a0")
 	_move(_p + Vector2(40, 0))
 	_wait(200)
+	return false
+
+
+## A painting on disk for the Open window to find: dated in the future so it
+## sorts first, removed again at the end.
+const FAKE := "user://paintings/painting_2099-01-01_00-00-00.png"
+const FAKE_COLOUR := Color8(240, 160, 30)
+
+
+func _stage_shape_press() -> bool:
+	_game.call("_choose_tool", 4)  # box
+	_game.call("_choose_colour", 8)  # blue
+	_game.call("_choose_size", 0, false)
+	_button(_paper_at(Vector2i(300, 100)), true)
+	_wait(150)
+	return false
+
+
+func _stage_shape_drag() -> bool:
+	_move(_paper_at(Vector2i(400, 180)))
+	_wait(150)
+	return false
+
+
+func _stage_shape_preview() -> bool:
+	_ck_true("dragging a box shows it", bool(_view.get("_shaping")))
+	_ck_true("...without touching the paper yet", _pixel(Vector2i(350, 100)).is_equal_approx(Color.WHITE))
+	_shot("p5_shape_preview")
+	_button(_paper_at(Vector2i(400, 180)), false)
+	_wait(200)
+	return false
+
+
+func _stage_shape_landed() -> bool:
+	_ck("letting go puts the box on the paper", _pixel(Vector2i(350, 100)).to_html(false), "1746d1")
+	_ck_true("...as an outline", _pixel(Vector2i(350, 140)).is_equal_approx(Color.WHITE))
+	_click(_centre((_game.get("_tool_buttons") as Array)[2]))  # the dropper, by its button
+	_wait(200)
+	return false
+
+
+func _stage_dropper() -> bool:
+	_ck("the dropper button picks the dropper", _game.get("_tool"), 2)
+	_move(_paper_at(Vector2i(200, 200)))
+	_wait(200)
+	return false
+
+
+func _stage_dropper_take() -> bool:
+	_shot("p5b_dropper")
+	_click(_paper_at(Vector2i(200, 200)))  # inside the red square from earlier
+	_wait(200)
+	return false
+
+
+func _stage_dropped() -> bool:
+	_ck("the dropper takes the colour it touched", (_game.call("colour") as Color).to_html(false), "e02020")
+	_ck("...and hands back the box tool", _game.get("_tool"), 4)
+	DirAccess.make_dir_recursive_absolute("user://paintings")
+	var img := Image.create_empty(1280, 720, false, Image.FORMAT_RGBA8)
+	img.fill(FAKE_COLOUR)
+	img.save_png(FAKE)
+	var open_b: Button = null
+	for c in (_game.get("_bar") as Control).find_children("*", "Button", true, false):
+		if (c as Button).text == "Open":
+			open_b = c
+	_click(_centre(open_b))
+	_wait(1200)
+	return false
+
+
+func _stage_gallery() -> bool:
+	var popup: PopupPanel = _game.get("_gallery")
+	var grid: GridContainer = _game.get("_gallery_grid")
+	_ck_true("Open shows the saved paintings", popup.visible and grid.get_child_count() > 0)
+	var first: Button = grid.get_child(0)
+	_ck("...newest first, labelled by date", first.text, "2099-01-01  00:00")
+	_ck_true("...with a picture of it", first.icon != null)
+	_shot("p6_gallery")
+	# The window is its own (embedded) Window: the button's rect is in the
+	# window's space, offset by where the window sits.
+	_click(Vector2(popup.position) + _centre(first))
+	_wait(400)
+	return false
+
+
+func _stage_opened() -> bool:
+	_ck_true("choosing one opens it", _pixel(Vector2i(640, 360)).is_equal_approx(FAKE_COLOUR))
+	_ck_true("...and closes the window", not (_game.get("_gallery") as PopupPanel).visible)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(FAKE))
+	_game.call("_on_undo")
+	_ck("Undo brings back the picture it replaced", _pixel(Vector2i(350, 100)).to_html(false), "1746d1")
+	_shot("p7_after_undo")
 	return false
 
 

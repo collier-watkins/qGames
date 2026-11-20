@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- An open folder: the back with its tab, the front flap tipped forward. -->
+  <path d="M3 6.5 a1.5 1.5 0 0 1 1.5 -1.5 H9 l2 2 h7.5 a1.5 1.5 0 0 1 1.5 1.5 V10"
+        fill="none" stroke="#23262b" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M3 6.5 V18 a1 1 0 0 0 1 1 H18.5 l3 -8.5 H7 L4 19"
+        fill="none" stroke="#23262b" stroke-width="2" stroke-linejoin="round"/>
+</svg>

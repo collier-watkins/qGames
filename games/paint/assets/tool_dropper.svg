@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- An eyedropper: bulb top-right, glass tube down to a tip bottom-left. -->
+  <g transform="rotate(45 12 12)">
+    <rect x="9.2" y="1.5" width="5.6" height="6" rx="2.6" fill="#23262b"/>
+    <rect x="7.6" y="7.4" width="8.8" height="2.2" rx="1" fill="#23262b"/>
+    <path d="M10 9.6 h4 v8.2 l-2 3.6 l-2 -3.6 z" fill="none" stroke="#23262b"
+          stroke-width="2" stroke-linejoin="round"/>
+  </g>
+</svg>

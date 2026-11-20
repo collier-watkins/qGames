@@ -678,6 +678,29 @@ child asking for "blue" means blue — plus pink. "Rubber" is now "Eraser".
   and chooses a slot, mouse-then-arrows-then-Space paints at the keys' pointer, mouse takes it back. Restores the
   player's `paint/custom_colours`. Shots `p1`-`p4` in `user://shots`.
 
+**Paint: shapes, colour dropper, Open (2026-11-20).**
+- Tools are six icon-only toggle buttons in a 3-wide grid (`Tool` enum order = grid order): Brush, Fill, Colour
+  dropper / Line, Box, Oval. Names are tooltips. The words went because six labelled buttons do not fit 1024.
+- **Shapes** (`PaintCanvas.Shape`, `shape_points`, `shape`, `constrain`): drag from one corner to the other, the
+  preview follows (`CanvasView._draw_shape_preview`, the same points the canvas will stroke, joints drawn like
+  dabs), and the shape lands on release as one undo step. Drawn with the current brush: size, round or square
+  tip, colour. Outline only, MS Paint's way: the bucket fills a closed box or oval, and a test checks that
+  the fill stays inside. Shift squares a box, rounds an oval and snaps a line to 45 degrees, for mouse drags
+  only, because with the keys Shift already means bigger steps. Keyboard: Space sets the first corner, the
+  arrows move the other, and Space again lands the shape.
+- **Dropper**: tap the paper and it takes that colour (its swatch if one exists, otherwise a new custom slot
+  via `_adopt_colour`), then hands back the previous tool (`_before_dropper`), as MS Paint does. The pointer is
+  `assets/dropper.svg` (64px, tip at (4,60)) plus a disc showing the colour under the tip.
+- **Open**: lists `user://paintings/painting_*.png` newest first, at most `GALLERY_MAX` 24, as thumbnails
+  (176x99). The thumbnails are decoded one per frame in `_process`, because a full PNG decode each would stall a
+  Pi if done all at once. They are freed when the window closes. Choosing one: `PaintCanvas.load_picture()`
+  copies it into the one Image (fitted if the size differs) as ONE undoable step, so the replaced picture is
+  one Undo away. The window uses the toolbar's light chrome.
+- Tests: 76 unit (shapes, constrain, pick, load_picture incl. same-Image check); interactive adds a box drag
+  (preview leaves the paper untouched, release lands it), the dropper by its real button, and Open, using a
+  future-dated fake painting it deletes afterwards. **Test gotcha:** a PopupPanel is its own embedded Window,
+  so a control's global rect inside it is in the popup's space; add `popup.position` to click it.
+
 Pictures are written to `user://paintings/` — app-private on Android,
 `~/.local/share/godot/app_userdata/Paint/paintings/` on Linux. MQTT VERIFIED
 on the wire, and not just that it published — the bytes were pulled back off

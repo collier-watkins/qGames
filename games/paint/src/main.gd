@@ -2,9 +2,10 @@ extends QGameRoot
 
 ## Paint — a drawing pad that saves PNGs.
 ##
-## Simple on purpose: three tools, round or square brushes, twelve colours
-## plus any the child mixes, undo, clear, save. No layers, no shapes, no text.
-## A child should be able to use all of it without being shown.
+## Simple on purpose: brush, fill, colour dropper and three shapes (line, box,
+## oval), round or square brushes, twelve colours plus any the child mixes,
+## undo, open, clear, save. No layers, no text, no selections. A child should be
+## able to use all of it without being shown.
 ##
 ## THE CONSTRAINT THAT SHAPED IT is memory. The previous generation crashed a
 ## Raspberry Pi after a long session because its undo and redo stacks each held
@@ -60,13 +61,21 @@ const ICON_REDO := preload("res://assets/redo.svg")
 const ICON_BUCKET := preload("res://assets/bucket.svg")
 const ICON_SAVE := preload("res://assets/save.svg")
 const ICON_CLEAR := preload("res://assets/clear.svg")
+const ICON_OPEN := preload("res://assets/open.svg")
+## Cursor art, 64px; its tip is at (4, 60) of the box.
+const ICON_DROPPER := preload("res://assets/dropper.svg")
 
 ## Toolbar artwork, authored at button size so it needs no scaling — the
 ## earlier attempt reused the 64px cursor art and it simply never appeared.
 const ICON_TOOL: Array = [
 	preload("res://assets/tool_brush.svg"),
 	preload("res://assets/tool_fill.svg"),
+	preload("res://assets/tool_dropper.svg"),
+	preload("res://assets/tool_line.svg"),
+	preload("res://assets/tool_rect.svg"),
+	preload("res://assets/tool_ellipse.svg"),
 ]
+const TOOL_TIPS: Array = ["Brush", "Fill", "Colour dropper", "Line", "Box", "Oval"]
 
 const BRUSH_SIZES: Array = [3, 8, 18, 34]
 
@@ -77,7 +86,15 @@ const CUSTOM_KEY: String = "paint/custom_colours"
 
 ## No eraser (removed 2026-11-20, owner: redundant): the white swatch with a
 ## square brush rubs out exactly as it did, and the paper is white.
-enum Tool { BRUSH, FILL }
+##
+## Order is the toolbar's: a 3-wide grid, so the painting tools over the shapes.
+enum Tool { BRUSH, FILL, DROPPER, LINE, RECT, ELLIPSE }
+
+## Where saved paintings live, and how many the Open window shows (newest
+## first). Each thumbnail costs a full PNG decode, so the list is capped.
+const PAINTINGS_DIR: String = "user://paintings"
+const GALLERY_MAX: int = 24
+const THUMB: Vector2i = Vector2i(176, 99)
 
 var _canvas: PaintCanvas
 var _view: CanvasView
@@ -102,6 +119,13 @@ var _size_buttons: Array = []
 var _tool_buttons: Array = []
 var _undo_button: Button
 var _redo_button: Button
+## The tool to go back to once the dropper has taken a colour.
+var _before_dropper: int = Tool.BRUSH
+var _gallery: PopupPanel
+var _gallery_grid: GridContainer
+var _gallery_note: Label
+## Thumbnails still to decode, [button, path], one per frame.
+var _gallery_queue: Array = []
 
 
 func _game_ready() -> void:
@@ -136,6 +160,11 @@ func _drag_bench() -> void:
 
 
 func _process(_delta: float) -> void:
+	# The Open window's thumbnails, one decode per frame: a full PNG each, and
+	# a Pi doing two dozen at once is a visible stall.
+	if not _gallery_queue.is_empty():
+		var job: Array = _gallery_queue.pop_front()
+		_load_thumb(job[0], job[1])
 	if _drag_n <= 0:
 		return
 	for i in 2:
@@ -174,6 +203,15 @@ func _colour_at(index: int) -> Color:
 
 func brush_square() -> bool:
 	return _square_brush
+
+
+## The canvas shape for the current tool, or -1 if it is not a shape tool.
+func shape_kind() -> int:
+	match _tool:
+		Tool.LINE: return PaintCanvas.Shape.LINE
+		Tool.RECT: return PaintCanvas.Shape.RECT
+		Tool.ELLIPSE: return PaintCanvas.Shape.ELLIPSE
+	return -1
 
 
 func brush_radius() -> int:
@@ -238,17 +276,18 @@ func _build_toolbar() -> Control:
 	bar.add_theme_constant_override("v_separation", 6)
 	_bar = bar
 
+	# Six tools as pictures in a 3-wide grid, painting tools over shapes. The
+	# words went when there were six: the picture is what a child who cannot
+	# read uses anyway, and the names are tooltips.
+	var tools := _grid(3)
 	_tool_buttons = []
-	for tool in [Tool.BRUSH, Tool.FILL]:
-		var label: String = ["Brush", "Fill"][tool]
-		var b := _make_button(label, func() -> void: _choose_tool(tool), true)
-		# The picture matters more than the word: a four-year-old who cannot
-		# read still knows which one is the brush.
-		b.icon = ICON_TOOL[tool]
+	for tool: int in Tool.values():
+		var b := _make_icon_button(ICON_TOOL[tool], func() -> void: _choose_tool(tool),
+				TOOL_TIPS[tool], true)
+		b.custom_minimum_size = Vector2(40, 32)
 		_tool_buttons.append(b)
-		# Top-aligned with the grids' first row (owner, 2026-11-20).
-		bar.add_child(b)
-		b.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		tools.add_child(b)
+	bar.add_child(tools)
 
 	_bar_add(_separator())
 
@@ -299,7 +338,11 @@ func _build_toolbar() -> Control:
 	bar.add_child(history)
 	# The words and a picture: the X and the floppy disk are read by a child
 	# who cannot read "Clear" and "Save" yet.
-	var files := _grid(2)
+	var files := _grid(3)
+	var open := _make_button("Open", _open_gallery, false)
+	open.icon = ICON_OPEN
+	files.add_child(open)
+	_build_gallery()
 	var clear := _make_button("Clear", _on_clear, false)
 	clear.icon = ICON_CLEAR
 	files.add_child(clear)
@@ -378,9 +421,13 @@ func _open_picker() -> void:
 
 
 func _on_add_colour() -> void:
-	var c: Color = _picker.color
-	c.a = 1.0
 	_picker_popup.hide()
+	_adopt_colour(_picker.color)
+
+
+## Choose `c`: its swatch if it already has one, otherwise a new slot.
+func _adopt_colour(c: Color) -> void:
+	c.a = 1.0
 	# Already there: choose it rather than add a twin.
 	for i in _colour_count():
 		if _colour_at(i).to_rgba32() == c.to_rgba32():
@@ -434,8 +481,10 @@ func _separator() -> Control:
 
 ## A button that is only an icon. Undo and redo are the two actions with a
 ## picture everybody already knows, so the words were costing width for nothing.
-func _make_icon_button(art: Texture2D, on_press: Callable, tip: String) -> Button:
+func _make_icon_button(art: Texture2D, on_press: Callable, tip: String,
+		toggle: bool = false) -> Button:
 	var b := Button.new()
+	b.toggle_mode = toggle
 	b.icon = art
 	b.tooltip_text = tip
 	b.expand_icon = true
@@ -493,6 +542,8 @@ func _style_button(b: Button) -> void:
 
 
 func _choose_tool(tool: int) -> void:
+	if tool == Tool.DROPPER and _tool != Tool.DROPPER:
+		_before_dropper = _tool
 	_tool = tool
 	_refresh()
 	_view.grab_focus()
@@ -508,6 +559,132 @@ func _choose_size(index: int, square: bool = _square_brush) -> void:
 func _choose_colour(index: int) -> void:
 	_colour_index = clampi(index, 0, _colour_count() - 1)
 	_refresh()
+	_view.grab_focus()
+
+
+## The dropper took `c` off the paper: choose it (a new slot if it is not on
+## the toolbar yet), then hand back the tool that was in use, as MS Paint
+## does — the dropper is a quick look, not a mode.
+func use_picked(c: Color) -> void:
+	_adopt_colour(c)
+	_tool = _before_dropper
+	_refresh()
+
+
+# ── Open ────────────────────────────────────────────────────────────────────
+
+
+func _build_gallery() -> void:
+	_gallery = PopupPanel.new()
+	# The toolbar's light chrome, not the engine's dark default.
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = C_CHROME
+	sb.border_color = C_LINE
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(10)
+	sb.set_content_margin_all(14)
+	_gallery.add_theme_stylebox_override("panel", sb)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	_gallery.add_child(box)
+	var title := Label.new()
+	title.text = "Open a painting"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", C_INK)
+	box.add_child(title)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(4 * (THUMB.x + 18), 2.2 * (THUMB.y + 40))
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(scroll)
+	_gallery_grid = _grid(4)
+	_gallery_grid.add_theme_constant_override("v_separation", 8)
+	scroll.add_child(_gallery_grid)
+	_gallery_note = Label.new()
+	_gallery_note.text = "No saved paintings yet. Save one first."
+	_gallery_note.add_theme_color_override("font_color", C_DIM)
+	box.add_child(_gallery_note)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	box.add_child(row)
+	row.add_child(_make_button("Cancel", func() -> void: _gallery.hide(), false))
+	# Thumbnails are textures: let them go with the window.
+	_gallery.popup_hide.connect(_clear_gallery)
+	add_child(_gallery)
+
+
+## Newest first, at most GALLERY_MAX. The file name carries the time it was
+## saved, so sorting names sorts by date.
+func saved_paintings() -> PackedStringArray:
+	var names := PackedStringArray()
+	for f: String in DirAccess.get_files_at(PAINTINGS_DIR):
+		if f.begins_with("painting_") and f.ends_with(".png"):
+			names.append(f)
+	names.sort()
+	names.reverse()
+	return names.slice(0, GALLERY_MAX)
+
+
+func _open_gallery() -> void:
+	_clear_gallery()
+	var names: PackedStringArray = saved_paintings()
+	_gallery_note.visible = names.is_empty()
+	for f: String in names:
+		var path: String = "%s/%s" % [PAINTINGS_DIR, f]
+		var b := Button.new()
+		b.text = _painting_label(f)
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		b.custom_minimum_size = Vector2(THUMB.x + 12, THUMB.y + 36)
+		b.focus_mode = Control.FOCUS_ALL
+		b.add_theme_font_size_override("font_size", 13)
+		_style_button(b)
+		b.pressed.connect(func() -> void: _open_painting(path))
+		_gallery_grid.add_child(b)
+		_gallery_queue.append([b, path])
+	_gallery.popup_centered()
+	if _gallery_grid.get_child_count() > 0:
+		(_gallery_grid.get_child(0) as Control).call_deferred("grab_focus")
+
+
+func _clear_gallery() -> void:
+	_gallery_queue.clear()
+	for c in _gallery_grid.get_children():
+		c.queue_free()
+
+
+func _load_thumb(b: Button, path: String) -> void:
+	if not is_instance_valid(b):
+		return
+	var img: Image = Image.load_from_file(path)
+	if img == null or img.is_empty():
+		return
+	img.resize(THUMB.x, THUMB.y, Image.INTERPOLATE_BILINEAR)
+	b.icon = ImageTexture.create_from_image(img)
+
+
+## "painting_2026-11-20_10-30-12.png" -> "2026-11-20  10:30".
+static func _painting_label(file: String) -> String:
+	var stem: String = file.trim_prefix("painting_").trim_suffix(".png")
+	var parts: PackedStringArray = stem.split("_")
+	if parts.size() < 2:
+		return stem
+	var hm: PackedStringArray = parts[1].split("-")
+	return "%s  %s" % [parts[0], ":".join(hm.slice(0, 2))]
+
+
+## Opening replaces the picture as ONE undoable step: the wrong one, or the
+## picture that was there, is one Undo away.
+func _open_painting(path: String) -> void:
+	_gallery.hide()
+	var img: Image = Image.load_from_file(path)
+	if img == null or img.is_empty() or not _canvas.load_picture(img):
+		_status.add_theme_color_override("font_color", Color("#c0453c"))
+		_status.text = "Could not open %s" % path.get_file()
+		return
+	_view.refresh_texture()
+	_refresh()
+	_status.add_theme_color_override("font_color", C_DIM)
+	_status.text = "Opened %s" % path.get_file()
 	_view.grab_focus()
 
 
@@ -588,7 +765,8 @@ func _refresh() -> void:
 	_undo_button.disabled = not _canvas.can_undo()
 	_redo_button.disabled = not _canvas.can_redo()
 
-	if not _status.text.begins_with("Saved") and not _status.text.begins_with("Could"):
+	if not _status.text.begins_with("Saved") and not _status.text.begins_with("Could") \
+			and not _status.text.begins_with("Opened"):
 		_status.add_theme_color_override("font_color", C_DIM)
 		_status.text = "%d strokes · history %.1f MB of %d · arrows move, space draws" % [
 			_strokes, _canvas.history_bytes() / 1048576.0,
@@ -660,6 +838,11 @@ class CanvasView extends Control:
 	## reports "key" before ANY input, and a crosshair parked mid-paper for a
 	## mouse user is a smudge they cannot rub out.
 	var _keys_active: bool = false
+	## A shape being dragged out: corner (or end) `_shape_a` to `_shape_b`,
+	## shown as a preview and put on the paper only when the pen lifts.
+	var _shaping: bool = false
+	var _shape_a: Vector2i = Vector2i.ZERO
+	var _shape_b: Vector2i = Vector2i.ZERO
 	var _scale: float = 1.0
 	var _offset: Vector2 = Vector2.ZERO
 	## Set when the picture changed; the upload happens once in _process.
@@ -804,6 +987,9 @@ class CanvasView extends Control:
 					Vector2(r.size) * _scale), false)
 		draw_rect(paper, C_LINE, false, 1.0)
 
+		if _shaping:
+			_draw_shape_preview()
+
 		# Exactly one pointer is ever drawn: the one that moved last. At the
 		# middle of the cursor's pixel, which is where a dab centres.
 		if _keys_active and has_focus():
@@ -816,9 +1002,47 @@ class CanvasView extends Control:
 	## so what is outlined is exactly what will be marked — which is the whole
 	## point of doing this rather than setting an OS cursor, since the canvas
 	## is scaled to fit the window.
+	## The shape as it will land: the same outline points the canvas will
+	## stroke, at the brush's width, with a round or square joint at each point
+	## like the dabs that will draw it.
+	func _draw_shape_preview() -> void:
+		var game = owner_game
+		var pts: PackedVector2Array = PaintCanvas.shape_points(game.shape_kind(),
+				_shape_a, _shape_end())
+		var screen := PackedVector2Array()
+		for p: Vector2 in pts:
+			screen.append(_offset + (p + Vector2(0.5, 0.5)) * _scale)
+		var half: float = maxf(0.5, (float(game.brush_radius()) + 0.5) * _scale)
+		var c: Color = game.colour()
+		if screen.size() >= 2:
+			draw_polyline(screen, c, half * 2.0)
+		for v: Vector2 in screen:
+			if game.brush_square():
+				draw_rect(Rect2(v - Vector2(half, half), Vector2(half, half) * 2.0), c)
+			else:
+				draw_circle(v, half, c)
+
+	## Shift squares a box, rounds an oval and snaps a line to 45 degrees — for
+	## a mouse drag only: with the keys, Shift already means "bigger steps".
+	func _shape_end() -> Vector2i:
+		if not _keys_active and Input.is_key_pressed(KEY_SHIFT):
+			return PaintCanvas.constrain(owner_game.shape_kind(), _shape_a, _shape_b)
+		return _shape_b
+
 	func _draw_tool(at: Vector2, active: bool) -> void:
 		var game = owner_game
 		match game._tool:
+			game.Tool.DROPPER:
+				# The colour under the tip, in a disc beside it, so the child
+				# sees what they are about to take before they take it.
+				var under: Color = canvas.pick(to_canvas(at))
+				var disc: Vector2 = at + Vector2(-16.0, -16.0)
+				draw_circle(disc, 10.0, under, true)
+				draw_arc(disc, 10.0, 0.0, TAU, 24, C_INK, 2.0, true)
+				var side: float = 44.0
+				var k: float = side / 64.0
+				draw_texture_rect(game.ICON_DROPPER,
+						Rect2(at - Vector2(4.0, 60.0) * k, Vector2(side, side)), false)
 			game.Tool.FILL:
 				var art: Texture2D = game.ICON_BUCKET
 				var side: float = 54.0
@@ -858,15 +1082,48 @@ class CanvasView extends Control:
 					canvas.dab(at, game.brush_radius(), game.colour(), sq)
 
 	func _begin(at: Vector2i) -> void:
+		var game = owner_game
+		if game._tool == game.Tool.DROPPER:
+			game.use_picked(canvas.pick(at))
+			queue_redraw()
+			return
+		if game.shape_kind() >= 0:
+			_shaping = true
+			_drawing = true
+			_shape_a = at
+			_shape_b = at
+			_last = at
+			queue_redraw()
+			return
 		canvas.begin_stroke()
 		_drawing = true
 		_last = at
 		_apply(at, at, false)
 
+	## The pen moved to `at` while down: the shape's far corner follows it, or
+	## the brush draws to it.
+	func _drag_to(at: Vector2i) -> void:
+		if _shaping:
+			_shape_b = at
+			queue_redraw()
+		else:
+			_apply(at, _last, true)
+		_last = at
+
 	func _end() -> void:
 		if not _drawing:
 			return
 		_drawing = false
+		if _shaping:
+			_shaping = false
+			var game = owner_game
+			canvas.begin_stroke()
+			canvas.shape(game.shape_kind(), _shape_a, _shape_end(), game.brush_radius(),
+					game.colour(), game.brush_square())
+			canvas.end_stroke()
+			queue_redraw()
+			stroke_finished.emit()
+			return
 		canvas.end_stroke()
 		# NOTHING to refresh: every dab marked the tiles it touched and they
 		# were uploaded on the frame it happened, so the GPU is already current.
@@ -903,8 +1160,7 @@ class CanvasView extends Control:
 			# back should not tear the line in two.
 			at = Vector2i(clampi(at.x, 0, canvas.width - 1),
 					clampi(at.y, 0, canvas.height - 1))
-			_apply(at, _last, true)
-			_last = at
+			_drag_to(at)
 			accept_event()
 		elif event is InputEventKey and (event as InputEventKey).pressed:
 			_key(event as InputEventKey)
@@ -947,8 +1203,9 @@ class CanvasView extends Control:
 					_pen_down = false
 					_end()
 				else:
-					_pen_down = true
 					_begin(_cursor)
+					# The dropper takes its colour and is done: no pen to lift.
+					_pen_down = _drawing
 				queue_redraw()
 				accept_event()
 				return
@@ -963,7 +1220,7 @@ class CanvasView extends Control:
 				clampi(_cursor.x + step.x * jump, 0, canvas.width - 1),
 				clampi(_cursor.y + step.y * jump, 0, canvas.height - 1))
 		if _pen_down:
-			_apply(moved, _cursor, true)
+			_drag_to(moved)
 		_cursor = moved
 		queue_redraw()
 		accept_event()

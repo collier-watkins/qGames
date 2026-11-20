@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- The dropper at cursor size. Its tip is the bottom-left corner (4,60):
+       the view draws it so the tip sits on the pixel that will be read. White
+       glass under ink so it reads on any colour. Drawn upright from the tip,
+       then leaned 45 degrees to the right about it. -->
+  <g transform="rotate(45 4 60)">
+    <path d="M4 60 l-4 -7 v-21 h8 v21 z" fill="#ffffff" stroke="#23262b"
+          stroke-width="3" stroke-linejoin="round"/>
+    <rect x="-5" y="27" width="18" height="6" rx="2" fill="#23262b"/>
+    <rect x="-2" y="7" width="12" height="21" rx="5" fill="#23262b"/>
+  </g>
+</svg>

@@ -268,6 +268,99 @@ static func _packed(colour: Color) -> int:
 	return value
 
 
+## ── shapes ──────────────────────────────────────────────────────────────────
+##
+## A shape is its outline as a polyline, drawn with the brush: round or square
+## tip, at the brush's size. The same points drive the view's preview while the
+## child drags, so what is previewed is what lands. Outline only — the bucket
+## fills it, MS Paint's way, and a hard-edged outline is exactly what a flood
+## fill stops at.
+
+enum Shape { LINE, RECT, ELLIPSE }
+
+
+## The outline from corner `a` to corner `b` (end to end for a line). Closed
+## shapes repeat their first point at the end.
+static func shape_points(kind: int, a: Vector2i, b: Vector2i) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	match kind:
+		Shape.LINE:
+			pts.append(Vector2(a))
+			pts.append(Vector2(b))
+		Shape.RECT:
+			pts.append(Vector2(a.x, a.y))
+			pts.append(Vector2(b.x, a.y))
+			pts.append(Vector2(b.x, b.y))
+			pts.append(Vector2(a.x, b.y))
+			pts.append(Vector2(a.x, a.y))
+		Shape.ELLIPSE:
+			var c := (Vector2(a) + Vector2(b)) * 0.5
+			var rx: float = absf(b.x - a.x) * 0.5
+			var ry: float = absf(b.y - a.y) * 0.5
+			# About one point per 4 px of rim: smooth at any size, and a dab
+			# per point stays cheap (stroke() fills between them anyway).
+			var n: int = clampi(int(PI * (rx + ry) / 4.0), 16, 256)
+			for i in n + 1:
+				var t: float = TAU * float(i) / float(n)
+				pts.append(c + Vector2(cos(t) * rx, sin(t) * ry))
+	return pts
+
+
+## Shift's job in a drag: a line snapped to the nearest 45 degrees, a square,
+## a circle. Returns the adjusted far corner.
+static func constrain(kind: int, a: Vector2i, b: Vector2i) -> Vector2i:
+	var d: Vector2i = b - a
+	if kind == Shape.LINE:
+		var ang: float = snappedf(atan2(float(d.y), float(d.x)), PI / 4.0)
+		var length: float = Vector2(d).length()
+		return a + Vector2i(Vector2(cos(ang), sin(ang)) * length)
+	var side: int = maxi(absi(d.x), absi(d.y))
+	return a + Vector2i(side * (1 if d.x >= 0 else -1), side * (1 if d.y >= 0 else -1))
+
+
+func shape(kind: int, a: Vector2i, b: Vector2i, radius: int, colour: Color,
+		square: bool = false) -> Rect2i:
+	var pts: PackedVector2Array = shape_points(kind, a, b)
+	var covered := Rect2i()
+	for i in range(1, pts.size()):
+		var seg: Rect2i = stroke(Vector2i(pts[i - 1].round()), Vector2i(pts[i].round()),
+				radius, colour, square)
+		if seg.size.x > 0:
+			covered = seg if covered.size.x <= 0 else covered.merge(seg)
+	return covered
+
+
+## The colour at a pixel, for the dropper. Opaque always: the paper is.
+func pick(at: Vector2i) -> Color:
+	if at.x < 0 or at.y < 0 or at.x >= width or at.y >= height:
+		return Color.WHITE
+	var c: Color = image.get_pixelv(at)
+	c.a = 1.0
+	return c
+
+
+## Replace the picture with `picture` — a saved painting being opened. One
+## undoable step, like a stroke, so opening the wrong one is one Undo away.
+## Copied INTO the one image (fitted to its size if it differs), never adopted:
+## the one-Image rule above is what keeps the Pi alive.
+func load_picture(picture: Image) -> bool:
+	if picture == null or picture.is_empty():
+		return false
+	var src: Image = picture
+	if src.get_format() != Image.FORMAT_RGBA8 or src.get_width() != width \
+			or src.get_height() != height:
+		src = Image.new()
+		src.copy_from(picture)
+		src.convert(Image.FORMAT_RGBA8)
+		src.resize(width, height, Image.INTERPOLATE_BILINEAR)
+	begin_stroke()
+	image.blit_rect(src, Rect2i(0, 0, width, height), Vector2i.ZERO)
+	_dirty_since_snapshot = true
+	end_stroke()
+	changed.emit(Rect2i(0, 0, width, height))
+	return true
+
+
 func clear(background: Color) -> void:
 	begin_stroke()
 	image.fill(background)
