@@ -158,10 +158,10 @@ func _stage_toolbar() -> bool:
 	_ck_true("Clear carries its X", clear_b != null and clear_b.icon != null)
 	_ck_true("Save carries its floppy disk", save_b != null and save_b.icon != null)
 	_ck_true("the toolbar fits one line at 1024 wide", _one_line())
-	# And with every mixed-colour slot full: a third row, not a wider bar.
+	# And with every mixed-colour slot full: still two rows, one line.
 	var full: Array = _game.get("_custom")
 	for i in int(_game.get("MAX_CUSTOM")):
-		full.append(Color.from_hsv(i / 11.0, 0.7, 0.9))
+		full.append(Color.from_hsv(i / 3.0, 0.7, 0.9))
 	_game.call("_rebuild_swatches")
 	_ck("eight size buttons, four round and four square", (_game.get("_size_buttons") as Array).size(), 8)
 	_ck("six tools: brush, fill, dropper, line, box, oval", (_game.get("_tool_buttons") as Array).size(), 6)
@@ -181,7 +181,12 @@ func _one_line() -> bool:
 
 func _stage_full_palette() -> bool:
 	_ck_true("...still one line with every colour slot full", _one_line())
-	_ck("...the colours in three rows", (_game.get("_colour_grid") as GridContainer).columns, 8)
+	var grid: GridContainer = _game.get("_colour_grid")
+	_ck("...the colours still in two rows of eight", [grid.columns, grid.get_child_count()], [8, 16])
+	# One more mixed colour drops the oldest rather than starting a third row.
+	_game.call("_adopt_colour", Color8(1, 2, 3))
+	_ck("...a fourth mixed colour drops the oldest, no third row",
+			[(_game.get("_custom") as Array).size(), grid.columns], [3, 8])
 	_shot("p1b_full_palette")
 	(_game.get("_custom") as Array).clear()
 	_game.call("_rebuild_swatches")

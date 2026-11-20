@@ -80,10 +80,10 @@ const TOOL_TIPS: Array = ["Brush", "Fill", "Colour dropper", "Line", "Box", "Ova
 const BRUSH_SIZES: Array = [3, 8, 18, 34]
 
 ## Colours mixed in the picker, after the twelve. Kept between sessions; at the
-## cap the oldest goes, so the toolbar cannot grow without end. 11 because the
-## colour grid is at most 8 wide (any wider and the toolbar wraps at 1024) and
-## at most 3 rows: 12 + 11 + the "+" is 24 cells.
-const MAX_CUSTOM: int = 11
+## cap the oldest goes, so the toolbar cannot grow without end. 3 because the
+## colour grid is two rows (owner, 2026-11-20: no third row) at most 8 wide
+## (any wider and the toolbar wraps at 1024): 12 + 3 + the "+" is 16 cells.
+const MAX_CUSTOM: int = 3
 const COLOUR_COLUMNS_MAX: int = 8
 const CUSTOM_KEY: String = "paint/custom_colours"
 
@@ -378,13 +378,11 @@ func _grid(columns: int) -> GridContainer:
 	return g
 
 
-## Two rows while they fit, a third once the mixed colours need it: wider
-## than COLOUR_COLUMNS_MAX and the whole toolbar wraps (found when a few mixed
-## colours pushed Save onto a line of its own). Rows are kept even.
+## Always two rows. MAX_CUSTOM keeps the count within two rows of
+## COLOUR_COLUMNS_MAX; any wider and the whole toolbar wraps (found when a few
+## mixed colours pushed Save onto a line of its own).
 func _fit_colour_grid() -> void:
-	var cells: int = _colour_count() + 1
-	var rows: int = maxi(2, ceili(cells / float(COLOUR_COLUMNS_MAX)))
-	_colour_grid.columns = maxi(1, ceili(cells / float(rows)))
+	_colour_grid.columns = mini(COLOUR_COLUMNS_MAX, ceili((_colour_count() + 1) / 2.0))
 
 
 func _add_swatch(i: int) -> void:

@@ -699,10 +699,11 @@ child asking for "blue" means blue — plus pink. "Rubber" is now "Eraser".
 - Shape tools' pointer is a two-tone crosshair, open in the middle (owner asked; a brush-sized outline hid
   the exact start point).
 - Actions: Open, Clear, Save on top; Undo and Redo beneath (owner's layout).
-- Colour grid capped at `COLOUR_COLUMNS_MAX` 8 columns (chips 27 wide, 4 apart). Past 2 rows' worth it grows a
-  third row instead of widening. A few mixed colours had widened it and wrapped the whole toolbar.
-  `MAX_CUSTOM` is 11 so that 12 + 11 + "+" fills exactly 3x8. The interactive test starts from no mixed
-  colours, checks one line both empty and full, and restores the player's list.
+- Colour grid: always two rows, at most `COLOUR_COLUMNS_MAX` 8 columns (chips 27 wide, 4 apart). A few mixed
+  colours had once widened it and wrapped the whole toolbar; a third row was tried next and the owner ruled
+  it out. So `MAX_CUSTOM` is 3 (12 + 3 + "+" = 2x8), and a fourth mixed colour drops the oldest. The
+  interactive test starts from no mixed colours, checks one line both empty and full and the drop-oldest,
+  and restores the player's list.
 - Tests: 76 unit (shapes, constrain, pick, load_picture incl. same-Image check); interactive adds a box drag
   (preview leaves the paper untouched, release lands it), the dropper by its real button, and Open, using a
   future-dated fake painting it deletes afterwards. **Test gotcha:** a PopupPanel is its own embedded Window,
