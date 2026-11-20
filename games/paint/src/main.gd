@@ -246,7 +246,9 @@ func _build_toolbar() -> Control:
 		# read still knows which one is the brush.
 		b.icon = ICON_TOOL[tool]
 		_tool_buttons.append(b)
-		_bar_add(b)
+		# Top-aligned with the grids' first row (owner, 2026-11-20).
+		bar.add_child(b)
+		b.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 
 	_bar_add(_separator())
 
@@ -287,9 +289,9 @@ func _build_toolbar() -> Control:
 
 	_bar_add(_separator())
 
-	# Stacked as well, undo over redo and Clear over Save: side by side, the
-	# row ran past 1024 and Save wrapped onto a line of its own.
-	var history := _grid(1)
+	# Undo and redo side by side, along the top; Clear over Save. All four in
+	# a row ran past 1024 and Save wrapped onto a line of its own.
+	var history := _grid(2)
 	_undo_button = _make_icon_button(ICON_UNDO, _on_undo, "Undo  (Ctrl+Z)")
 	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")
 	history.add_child(_undo_button)
