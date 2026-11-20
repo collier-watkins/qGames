@@ -2,9 +2,9 @@ extends QGameRoot
 
 ## Paint — a drawing pad that saves PNGs.
 ##
-## Simple on purpose: three tools, a fixed palette, undo, clear, save. No
-## layers, no shapes, no text. A child should be able to use all of it without
-## being shown.
+## Simple on purpose: three tools, round or square brushes, twelve colours
+## plus any the child mixes, undo, clear, save. No layers, no shapes, no text.
+## A child should be able to use all of it without being shown.
 ##
 ## THE CONSTRAINT THAT SHAPED IT is memory. The previous generation crashed a
 ## Raspberry Pi after a long session because its undo and redo stacks each held
@@ -59,6 +59,8 @@ const ICON_UNDO := preload("res://assets/undo.svg")
 const ICON_REDO := preload("res://assets/redo.svg")
 const ICON_BUCKET := preload("res://assets/bucket.svg")
 const ICON_ERASER := preload("res://assets/eraser.svg")
+const ICON_SAVE := preload("res://assets/save.svg")
+const ICON_CLEAR := preload("res://assets/clear.svg")
 
 ## Toolbar artwork, authored at button size so it needs no scaling — the
 ## earlier attempt reused the 64px cursor art and it simply never appeared.
@@ -70,6 +72,11 @@ const ICON_TOOL: Array = [
 
 const BRUSH_SIZES: Array = [3, 8, 18, 34]
 
+## Colours mixed in the picker, after the twelve. Kept between sessions; at the
+## cap the oldest goes, so the toolbar cannot grow without end.
+const MAX_CUSTOM: int = 12
+const CUSTOM_KEY: String = "paint/custom_colours"
+
 enum Tool { BRUSH, ERASER, FILL }
 
 var _canvas: PaintCanvas
@@ -79,10 +86,17 @@ var _status: Label
 var _tool: int = Tool.BRUSH
 var _colour_index: int = 0
 var _size_index: int = 1
+## The brush's shape. The eraser is always square, whatever this says.
+var _square_brush: bool = false
+var _custom: Array[Color] = []
 var _strokes: int = 0
 var _saves: int = 0
 
 var _swatches: Array = []
+var _bar: HFlowContainer
+var _add_colour: Button
+var _picker_popup: PopupPanel
+var _picker: ColorPicker
 var _size_buttons: Array = []
 var _tool_buttons: Array = []
 var _undo_button: Button
@@ -91,6 +105,7 @@ var _redo_button: Button
 
 func _game_ready() -> void:
 	_canvas = PaintCanvas.new(CANVAS_W, CANVAS_H, C_PAPER)
+	_load_custom()
 	_build_ui()
 	_view.canvas = _canvas
 	_view.attach()
@@ -145,7 +160,19 @@ func _process(_delta: float) -> void:
 
 
 func colour() -> Color:
-	return PALETTE[_colour_index]
+	return _colour_at(_colour_index)
+
+
+func _colour_count() -> int:
+	return PALETTE.size() + _custom.size()
+
+
+func _colour_at(index: int) -> Color:
+	return PALETTE[index] if index < PALETTE.size() else _custom[index - PALETTE.size()]
+
+
+func brush_square() -> bool:
+	return _square_brush or _tool == Tool.ERASER
 
 
 func brush_radius() -> int:
@@ -218,30 +245,36 @@ func _build_toolbar() -> Control:
 
 	bar.add_child(_separator())
 
+	# Two sets of sizes, round then square. One choice across all eight: the
+	# button says both the size and the shape the brush will put down.
 	_size_buttons = []
-	for i in BRUSH_SIZES.size():
-		var b := SizeButton.new()
-		b.radius = int(BRUSH_SIZES[i])
-		b.custom_minimum_size = Vector2(38, 34)
-		b.toggle_mode = true
-		b.focus_mode = Control.FOCUS_ALL
-		_style_button(b)
-		b.pressed.connect(func() -> void: _choose_size(i))
-		_size_buttons.append(b)
-		bar.add_child(b)
+	for square: bool in [false, true]:
+		for i in BRUSH_SIZES.size():
+			var b := SizeButton.new()
+			b.radius = int(BRUSH_SIZES[i])
+			b.square = square
+			b.custom_minimum_size = Vector2(38, 34)
+			b.toggle_mode = true
+			b.focus_mode = Control.FOCUS_ALL
+			b.tooltip_text = ("Square" if square else "Round") + " brush"
+			_style_button(b)
+			b.pressed.connect(func() -> void: _choose_size(i, square))
+			_size_buttons.append(b)
+			bar.add_child(b)
 
 	bar.add_child(_separator())
 
+	_bar = bar
 	_swatches = []
-	for i in PALETTE.size():
-		var s := Swatch.new()
-		s.colour = PALETTE[i]
-		s.custom_minimum_size = Vector2(30, 34)
-		s.focus_mode = Control.FOCUS_ALL
-		s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		s.chosen.connect(func() -> void: _choose_colour(i))
-		_swatches.append(s)
-		bar.add_child(s)
+	for i in _colour_count():
+		_add_swatch(i)
+	# Mixing a colour of their own: the full picker, in a popup so the toolbar
+	# stays a row of things to tap.
+	_add_colour = _make_button("+", _open_picker, false)
+	_add_colour.tooltip_text = "Mix a new colour"
+	_add_colour.custom_minimum_size = Vector2(34, 34)
+	bar.add_child(_add_colour)
+	_build_picker()
 
 	bar.add_child(_separator())
 
@@ -249,9 +282,105 @@ func _build_toolbar() -> Control:
 	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")
 	bar.add_child(_undo_button)
 	bar.add_child(_redo_button)
-	bar.add_child(_make_button("Clear", _on_clear, false))
-	bar.add_child(_make_button("Save", _on_save, false))
+	# The words and a picture: the X and the floppy disk are read by a child
+	# who cannot read "Clear" and "Save" yet.
+	var clear := _make_button("Clear", _on_clear, false)
+	clear.icon = ICON_CLEAR
+	bar.add_child(clear)
+	var save := _make_button("Save", _on_save, false)
+	save.icon = ICON_SAVE
+	bar.add_child(save)
 	return bar
+
+
+func _add_swatch(i: int) -> void:
+	var s := Swatch.new()
+	s.colour = _colour_at(i)
+	s.custom_minimum_size = Vector2(30, 34)
+	s.focus_mode = Control.FOCUS_ALL
+	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	s.chosen.connect(func() -> void: _choose_colour(i))
+	_swatches.append(s)
+	_bar.add_child(s)
+	# Before the "+" once it exists, so the new colour sits with the others.
+	if _add_colour != null:
+		_bar.move_child(s, _add_colour.get_index())
+
+
+func _build_picker() -> void:
+	_picker_popup = PopupPanel.new()
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	_picker_popup.add_child(box)
+	_picker = ColorPicker.new()
+	_picker.edit_alpha = false
+	_picker.color_mode = ColorPicker.MODE_RGB
+	_picker.picker_shape = ColorPicker.SHAPE_HSV_RECTANGLE
+	# The picker, the RGB sliders and the hex field. Not its own swatch
+	# shelf (the toolbar is the shelf) nor the screen sampler.
+	_picker.can_add_swatches = false
+	_picker.presets_visible = false
+	_picker.sampler_visible = false
+	# RGB only: no HSV/Linear tabs, and no HDR intensity slider ("I"), which
+	# means nothing on paper. set() because edit_intensity is a 4.x addition.
+	_picker.color_modes_visible = false
+	_picker.set("edit_intensity", false)
+	box.add_child(_picker)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 8)
+	box.add_child(row)
+	row.add_child(_make_button("Cancel", func() -> void: _picker_popup.hide(), false))
+	row.add_child(_make_button("Add colour", _on_add_colour, false))
+	_picker_popup.popup_hide.connect(func() -> void: _view.grab_focus())
+	add_child(_picker_popup)
+
+
+func _open_picker() -> void:
+	_picker.color = colour()
+	_picker_popup.popup_centered()
+	_picker.call_deferred("grab_focus")
+
+
+func _on_add_colour() -> void:
+	var c: Color = _picker.color
+	c.a = 1.0
+	_picker_popup.hide()
+	# Already there: choose it rather than add a twin.
+	for i in _colour_count():
+		if _colour_at(i).to_rgba32() == c.to_rgba32():
+			_choose_colour(i)
+			return
+	if _custom.size() >= MAX_CUSTOM:
+		_custom.remove_at(0)
+	_custom.append(c)
+	_save_custom()
+	_rebuild_swatches()
+	_choose_colour(_colour_count() - 1)
+
+
+func _rebuild_swatches() -> void:
+	for s: Control in _swatches:
+		s.queue_free()
+	_swatches = []
+	for i in _colour_count():
+		_add_swatch(i)
+
+
+func _load_custom() -> void:
+	_custom = []
+	var stored = QConfig.get_value(CUSTOM_KEY, PackedStringArray())
+	for h in stored:
+		if Color.html_is_valid(str(h)) and _custom.size() < MAX_CUSTOM:
+			_custom.append(Color.html(str(h)))
+
+
+func _save_custom() -> void:
+	var out := PackedStringArray()
+	for c: Color in _custom:
+		out.append(c.to_html(false))
+	QConfig.set_value(CUSTOM_KEY, out)
+	QConfig.save()
 
 
 func _separator() -> Control:
@@ -333,14 +462,15 @@ func _choose_tool(tool: int) -> void:
 	_view.grab_focus()
 
 
-func _choose_size(index: int) -> void:
+func _choose_size(index: int, square: bool = _square_brush) -> void:
 	_size_index = clampi(index, 0, BRUSH_SIZES.size() - 1)
+	_square_brush = square
 	_refresh()
 	_view.grab_focus()
 
 
 func _choose_colour(index: int) -> void:
-	_colour_index = clampi(index, 0, PALETTE.size() - 1)
+	_colour_index = clampi(index, 0, _colour_count() - 1)
 	# Picking a colour means you want to draw with it, not rub it out.
 	if _tool == Tool.ERASER:
 		_tool = Tool.BRUSH
@@ -414,9 +544,8 @@ func _on_save() -> void:
 func _refresh() -> void:
 	for i in _tool_buttons.size():
 		(_tool_buttons[i] as Button).set_pressed_no_signal(i == _tool)
-	for i in _size_buttons.size():
-		var b: Button = _size_buttons[i]
-		b.set_pressed_no_signal(i == _size_index)
+	for b: SizeButton in _size_buttons:
+		b.set_pressed_no_signal(b.radius == brush_radius() and b.square == _square_brush)
 		b.queue_redraw()
 	for i in _swatches.size():
 		var s = _swatches[i]
@@ -491,11 +620,13 @@ class CanvasView extends Control:
 	## the paper. The OS cursor is hidden there and the tool drawn instead.
 	var _pointer: Vector2 = Vector2.ZERO
 	var _pointer_on_paper: bool = false
-	## The keyboard pointer stays hidden until somebody actually steers it.
-	## QInput reports "key" before ANY input has happened, so trusting that
-	## alone parks a crosshair in the middle of a fresh window for every mouse
-	## user — which is exactly the thing it was removed for.
-	var _keys_used: bool = false
+	## Which pointer is live, the keys' or the mouse's: whichever moved last.
+	## Before, a mouse resting on the paper kept the tool drawn under it while
+	## the arrows moved an invisible cursor elsewhere, so Space painted away
+	## from where the pointer showed (owner, 2026-11-20). Starts false: QInput
+	## reports "key" before ANY input, and a crosshair parked mid-paper for a
+	## mouse user is a smudge they cannot rub out.
+	var _keys_active: bool = false
 	var _scale: float = 1.0
 	var _offset: Vector2 = Vector2.ZERO
 	## Set when the picture changed; the upload happens once in _process.
@@ -640,14 +771,12 @@ class CanvasView extends Control:
 					Vector2(r.size) * _scale), false)
 		draw_rect(paper, C_LINE, false, 1.0)
 
-		# The keyboard pointer, only for somebody actually driving with keys or
-		# a pad. A mouse user gets the tool drawn under their pointer instead.
-		# Exactly one pointer is ever drawn. The mouse wins when it is over
-		# the paper, because that is plainly where the child is looking.
-		if _pointer_on_paper:
+		# Exactly one pointer is ever drawn: the one that moved last. At the
+		# middle of the cursor's pixel, which is where a dab centres.
+		if _keys_active and has_focus():
+			_draw_tool(_offset + (Vector2(_cursor) + Vector2(0.5, 0.5)) * _scale, _pen_down)
+		elif _pointer_on_paper:
 			_draw_tool(_pointer, false)
-		elif _keys_used and has_focus() and QInput.wants_focus_ui():
-			_draw_tool(_offset + Vector2(_cursor) * _scale, _pen_down)
 
 	## The pointer IS the tool: a circle the size of the brush, a white block
 	## for the eraser, a tipped bucket for fill. Drawn at the on-screen scale,
@@ -677,10 +806,16 @@ class CanvasView extends Control:
 				draw_rect(box, C_INK, false, 2.0, true)
 			_:
 				var r: float = maxf(2.0, float(game.brush_radius()) * _scale)
-				# Two rings, light over dark, so the outline stays visible on
-				# both a white page and a colour the child just laid down.
-				draw_arc(at, r, 0.0, TAU, 32, Color(0, 0, 0, 0.75), 2.0, true)
-				draw_arc(at, r - 1.5, 0.0, TAU, 32, Color(1, 1, 1, 0.75), 1.5, true)
+				# Two outlines, light over dark, so the outline stays visible on
+				# both a white page and a colour the child just laid down. The
+				# shape the brush puts down: a square brush shows a square.
+				if game.brush_square():
+					var outer := Rect2(at - Vector2(r, r), Vector2(r, r) * 2.0)
+					draw_rect(outer, Color(0, 0, 0, 0.75), false, 2.0, true)
+					draw_rect(outer.grow(-1.5), Color(1, 1, 1, 0.75), false, 1.5, true)
+				else:
+					draw_arc(at, r, 0.0, TAU, 32, Color(0, 0, 0, 0.75), 2.0, true)
+					draw_arc(at, r - 1.5, 0.0, TAU, 32, Color(1, 1, 1, 0.75), 1.5, true)
 				if active:
 					draw_circle(at, maxf(2.0, r * 0.25), game.colour(), true)
 
@@ -696,10 +831,11 @@ class CanvasView extends Control:
 				else:
 					canvas.dab(at, game.brush_radius(), C_PAPER, true)
 			_:
+				var sq: bool = game.brush_square()
 				if joined:
-					canvas.stroke(from, at, game.brush_radius(), game.colour())
+					canvas.stroke(from, at, game.brush_radius(), game.colour(), sq)
 				else:
-					canvas.dab(at, game.brush_radius(), game.colour())
+					canvas.dab(at, game.brush_radius(), game.colour(), sq)
 
 	func _begin(at: Vector2i) -> void:
 		canvas.begin_stroke()
@@ -727,6 +863,7 @@ class CanvasView extends Control:
 				return
 			var at: Vector2i = to_canvas(mb.position)
 			if mb.pressed:
+				_keys_active = false
 				grab_focus()
 				if _inside(at):
 					_begin(at)
@@ -735,6 +872,8 @@ class CanvasView extends Control:
 				_end()
 				accept_event()
 		elif event is InputEventMouseMotion:
+			if (event as InputEventMouseMotion).relative != Vector2.ZERO:
+				_keys_active = false
 			_track_pointer((event as InputEventMouseMotion).position)
 			if not _drawing:
 				accept_event()
@@ -760,6 +899,15 @@ class CanvasView extends Control:
 					else Input.MOUSE_MODE_VISIBLE)
 		queue_redraw()
 
+	## The keys take the pointer over from wherever the mouse left it on the
+	## paper, so the cursor carries on from the spot the child was looking at
+	## instead of jumping back to where the keys last were.
+	func _take_keys() -> void:
+		if not _keys_active and _pointer_on_paper:
+			var at: Vector2i = to_canvas(_pointer)
+			_cursor = Vector2i(clampi(at.x, 0, canvas.width - 1), clampi(at.y, 0, canvas.height - 1))
+		_keys_active = true
+
 	func _inside(at: Vector2i) -> bool:
 		return at.x >= 0 and at.y >= 0 and at.x < canvas.width and at.y < canvas.height
 
@@ -774,7 +922,7 @@ class CanvasView extends Control:
 			KEY_UP: step = Vector2i(0, -1)
 			KEY_DOWN: step = Vector2i(0, 1)
 			KEY_SPACE, KEY_ENTER, KEY_KP_ENTER:
-				_keys_used = true
+				_take_keys()
 				if _pen_down:
 					_pen_down = false
 					_end()
@@ -786,7 +934,7 @@ class CanvasView extends Control:
 				return
 		if step == Vector2i.ZERO:
 			return
-		_keys_used = true
+		_take_keys()
 		# A brush-sized step, so crossing the canvas does not take all day.
 		var jump: int = maxi(2, owner_game.brush_radius())
 		if key.shift_pressed:
@@ -849,7 +997,15 @@ class Swatch extends Control:
 ## A brush-size button that shows the size rather than naming it.
 class SizeButton extends Button:
 	var radius: int = 4
+	var square: bool = false
 
 	func _draw() -> void:
 		var shown: float = clampf(float(radius) * 0.42, 2.0, 12.0)
-		draw_circle(size * 0.5, shown, C_INK if not button_pressed else C_ACCENT, true)
+		var ink: Color = C_INK if not button_pressed else C_ACCENT
+		if square:
+			# A touch smaller than the circle beside it, so they read as the
+			# same size rather than the square looking heavier.
+			var h: float = shown * 0.9
+			draw_rect(Rect2(size * 0.5 - Vector2(h, h), Vector2(h, h) * 2.0), ink, true)
+		else:
+			draw_circle(size * 0.5, shown, ink, true)

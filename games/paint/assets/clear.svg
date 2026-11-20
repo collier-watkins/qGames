@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- A plain X: everything goes. Red, the one colour on the toolbar that
+       means "careful". -->
+  <line x1="5.5" y1="5.5" x2="18.5" y2="18.5" stroke="#c0453c" stroke-width="3.2" stroke-linecap="round"/>
+  <line x1="18.5" y1="5.5" x2="5.5" y2="18.5" stroke="#c0453c" stroke-width="3.2" stroke-linecap="round"/>
+</svg>

@@ -653,6 +653,25 @@ is an SVG too, drawn both on the Fill button and as the cursor. The palette is
 twelve colours with the plain primaries rather than muted designer versions — a
 child asking for "blue" means blue — plus pink. "Rubber" is now "Eraser".
 
+**Paint update (2026-11-20).**
+- Clear and Save keep their words and gain icons (`assets/clear.svg`, a red X; `assets/save.svg`, a floppy disk).
+- Square brushes: a second row of four size buttons drawing squares (`SizeButton.square`). One choice across all
+  eight; `_square_brush` plus `brush_square()` (true for the eraser too) feed `canvas.dab/stroke(..., square)`,
+  and the pointer outline is a square to match.
+- Colour mixing: "+" after the swatches opens a `ColorPicker` in a `PopupPanel` (RGB sliders, hex field, HSV
+  rectangle; no mode tabs, intensity slider, presets or screen sampler). "Add colour" appends a swatch and chooses
+  it; a colour already present is chosen instead of duplicated. Up to `MAX_CUSTOM` 12, oldest dropped, stored in
+  `paint/custom_colours` (hex strings) and reloaded at start.
+- Arrow-key pointer fix. Was: with the mouse resting on the paper, the tool stayed drawn under the mouse while
+  the arrows moved an invisible cursor, so Space painted away from the shown pointer. Now whichever moved last
+  owns the pointer (`_keys_active`; real mouse motion or a click hands it back), the keys pick up from the
+  mouse's spot, and the key pointer is drawn at its pixel's middle, where the dab centres.
+- The toolbar now wraps to two rows at the 1024x576 design size (eight sizes plus the "+"); the paper shrinks to
+  match. Accepted rather than shrinking the buttons below touch size.
+- `tests/interactive.gd` is new for paint (needs a display): icons, square brush paints its corners, picker adds
+  and chooses a slot, mouse-then-arrows-then-Space paints at the keys' pointer, mouse takes it back. Restores the
+  player's `paint/custom_colours`. Shots `p1`-`p4` in `user://shots`.
+
 Pictures are written to `user://paintings/` — app-private on Android,
 `~/.local/share/godot/app_userdata/Paint/paintings/` on Linux. MQTT VERIFIED
 on the wire, and not just that it published — the bytes were pulled back off
@@ -2019,6 +2038,21 @@ covers either side's check: the one the player gets and the one the player gives
   - the "!" danger badges while the check aid is up;
   - the "Check! " lead of the explanation (the status line above says it; "Double check!" and "Checkmate!" stay);
   - the mated king's glow, which now fades out as it topples.
+- **Demo mode (2026-11-20): `chess -- --demo`.** `src/demo.gd` (`ChessDemo`) plays a fixed line through the real
+  view, looping: 1.e4 e5 2.d4 Bb4+ (the player is in check: glows, then the c2 pawn "pointed at", then 3.c3)
+  ... 5.Qh5 Nf6 6.Qxf7# (trap, topple, confetti, end card). White's side, every aid on, in memory only:
+  `_save_prefs()` and `_publish()` are no-ops while `_demo` is set, and the computer never thinks.
+  `demo.gd` holds main untyped: naming `ChessView` makes it depend on main.gd, which needs the autoloads that a
+  `--script` tool lacks. `tests/demo_shots.gd` runs it here with timed screenshots. On the Pi:
+  `ssh qpi 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 setsid nohup ~/.local/share/qgames/chess/chess -- --demo >/tmp/chess-demo.log 2>&1 </dev/null &'`
+  (the ssh hangs on exit; the game survives it). "X11 Display is not available" in its log is the harmless
+  X11-first probe before Wayland.
+  - A demo holds the screen awake (`DisplayServer.screen_set_keep_on(true)`, demo only): nobody touches it, so
+    the Pi's 5-minute swayidle blank turned it off within minutes of the first run.
+  - Wake the Pi's screen remotely: `ssh qpi 'XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlopm --on "*"'`;
+    `wlopm` alone prints the state.
+  - Do not `pkill -f "chess -- --demo"` inside `ssh qpi '...'`: the pattern matches that ssh's own bash command
+    line and kills it. Use `pgrep -f "^/home/q/.local/share/qgames/chess/chess -- --demo"` or the pid.
 - **Test gotcha:** `_clear_overlay()` uses `queue_free`, so a just-closed card's veil still swallows clicks parsed
   in the same frame. Start the new game in one stage and play in the next.
 - **Tests.** `tests/run.gd` `_test_check_why`: back-rank, smothered and protected-checker mates (270 pass). Interactive mate stages: `mate_trap`, `mate_party`, `mate_card` (card only after the dwell) and `mate_skip` (a tap brings the card); shots `06h`-`06j`. `tests/interactive.gd` stages `check_shown` (Ra1-a8+
