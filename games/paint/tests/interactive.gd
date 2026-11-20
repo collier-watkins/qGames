@@ -127,13 +127,20 @@ func _stage_toolbar() -> bool:
 	var bar: Control = _game.get("_bar")
 	var clear_b: Button = null
 	var save_b: Button = null
-	for c in bar.get_children():
+	for c in bar.find_children("*", "Button", true, false):
 		if c is Button and (c as Button).text == "Clear":
 			clear_b = c
 		if c is Button and (c as Button).text == "Save":
 			save_b = c
 	_ck_true("Clear carries its X", clear_b != null and clear_b.icon != null)
 	_ck_true("Save carries its floppy disk", save_b != null and save_b.icon != null)
+	# One line at the design size: every bar child on the first row.
+	var top: float = bar.get_child(0).position.y
+	var one_line := true
+	for c in bar.get_children():
+		if (c as Control).position.y > top + 40.0:
+			one_line = false
+	_ck_true("the toolbar fits one line at 1024 wide", one_line)
 	_ck("eight size buttons, four round and four square", (_game.get("_size_buttons") as Array).size(), 8)
 	_shot("p1_toolbar")
 	_wait(200)

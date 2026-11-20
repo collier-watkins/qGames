@@ -666,8 +666,10 @@ child asking for "blue" means blue — plus pink. "Rubber" is now "Eraser".
   the arrows moved an invisible cursor, so Space painted away from the shown pointer. Now whichever moved last
   owns the pointer (`_keys_active`; real mouse motion or a click hands it back), the keys pick up from the
   mouse's spot, and the key pointer is drawn at its pixel's middle, where the dab centres.
-- The toolbar now wraps to two rows at the 1024x576 design size (eight sizes plus the "+"); the paper shrinks to
-  match. Accepted rather than shrinking the buttons below touch size.
+- Toolbar layout (owner's call): sizes are a 2-row grid, round over square; colours a 2-row grid (columns grow
+  with mixed colours, "+" last); undo over redo and Clear over Save. Single-row groups (tools, separators) are
+  `SIZE_SHRINK_CENTER`. Side by side, the bar ran past 1024 and wrapped; the interactive test now checks it fits
+  one line at the design size.
 - `tests/interactive.gd` is new for paint (needs a display): icons, square brush paints its corners, picker adds
   and chooses a slot, mouse-then-arrows-then-Space paints at the keys' pointer, mouse takes it back. Restores the
   player's `paint/custom_colours`. Shots `p1`-`p4` in `user://shots`.

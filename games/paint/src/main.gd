@@ -94,6 +94,7 @@ var _saves: int = 0
 
 var _swatches: Array = []
 var _bar: HFlowContainer
+var _colour_grid: GridContainer
 var _add_colour: Button
 var _picker_popup: PopupPanel
 var _picker: ColorPicker
@@ -224,13 +225,18 @@ func _build_ui() -> void:
 
 
 func _build_toolbar() -> Control:
-	# An HFlowContainer, not an HBox: three tools, four sizes, twelve colours
-	# and four actions do not fit one row on a narrow window — and they REALLY
-	# do not once the reading size is turned up, which shrinks the logical
-	# viewport. An HBox would simply overflow and shove the paper off screen.
+	# An HFlowContainer, not an HBox: the groups do not fit one row on a narrow
+	# window — and they REALLY do not once the reading size is turned up, which
+	# shrinks the logical viewport. An HBox would simply overflow and shove the
+	# paper off screen.
+	#
+	# Sizes and colours are two-row grids: round brushes over square ones, and
+	# the colours in two rows (owner, 2026-11-20). The single-row groups sit
+	# centred beside them rather than stretched to the grids' height.
 	var bar := HFlowContainer.new()
 	bar.add_theme_constant_override("h_separation", 6)
 	bar.add_theme_constant_override("v_separation", 6)
+	_bar = bar
 
 	_tool_buttons = []
 	for tool in [Tool.BRUSH, Tool.ERASER, Tool.FILL]:
@@ -239,72 +245,99 @@ func _build_toolbar() -> Control:
 		# The picture matters more than the word: a four-year-old who cannot
 		# read still knows which one is the brush.
 		b.icon = ICON_TOOL[tool]
-
 		_tool_buttons.append(b)
-		bar.add_child(b)
+		_bar_add(b)
 
-	bar.add_child(_separator())
+	_bar_add(_separator())
 
-	# Two sets of sizes, round then square. One choice across all eight: the
-	# button says both the size and the shape the brush will put down.
+	# One choice across all eight: the button says both the size and the shape
+	# the brush will put down.
+	var sizes := _grid(BRUSH_SIZES.size())
 	_size_buttons = []
 	for square: bool in [false, true]:
 		for i in BRUSH_SIZES.size():
 			var b := SizeButton.new()
 			b.radius = int(BRUSH_SIZES[i])
 			b.square = square
-			b.custom_minimum_size = Vector2(38, 34)
+			b.custom_minimum_size = Vector2(38, 32)
 			b.toggle_mode = true
 			b.focus_mode = Control.FOCUS_ALL
 			b.tooltip_text = ("Square" if square else "Round") + " brush"
 			_style_button(b)
 			b.pressed.connect(func() -> void: _choose_size(i, square))
 			_size_buttons.append(b)
-			bar.add_child(b)
+			sizes.add_child(b)
+	bar.add_child(sizes)
 
-	bar.add_child(_separator())
+	_bar_add(_separator())
 
-	_bar = bar
+	_colour_grid = _grid(1)
+	bar.add_child(_colour_grid)
+	# Mixing a colour of their own: the full picker, in a popup so the toolbar
+	# stays a set of things to tap. Last cell of the colour grid.
+	_add_colour = _make_button("+", _open_picker, false)
+	_add_colour.tooltip_text = "Mix a new colour"
+	_add_colour.custom_minimum_size = Vector2(32, 32)
+	_colour_grid.add_child(_add_colour)
 	_swatches = []
 	for i in _colour_count():
 		_add_swatch(i)
-	# Mixing a colour of their own: the full picker, in a popup so the toolbar
-	# stays a row of things to tap.
-	_add_colour = _make_button("+", _open_picker, false)
-	_add_colour.tooltip_text = "Mix a new colour"
-	_add_colour.custom_minimum_size = Vector2(34, 34)
-	bar.add_child(_add_colour)
+	_fit_colour_grid()
 	_build_picker()
 
-	bar.add_child(_separator())
+	_bar_add(_separator())
 
+	# Stacked as well, undo over redo and Clear over Save: side by side, the
+	# row ran past 1024 and Save wrapped onto a line of its own.
+	var history := _grid(1)
 	_undo_button = _make_icon_button(ICON_UNDO, _on_undo, "Undo  (Ctrl+Z)")
 	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")
-	bar.add_child(_undo_button)
-	bar.add_child(_redo_button)
+	history.add_child(_undo_button)
+	history.add_child(_redo_button)
+	bar.add_child(history)
 	# The words and a picture: the X and the floppy disk are read by a child
 	# who cannot read "Clear" and "Save" yet.
+	var files := _grid(1)
 	var clear := _make_button("Clear", _on_clear, false)
 	clear.icon = ICON_CLEAR
-	bar.add_child(clear)
+	files.add_child(clear)
 	var save := _make_button("Save", _on_save, false)
 	save.icon = ICON_SAVE
-	bar.add_child(save)
+	files.add_child(save)
+	bar.add_child(files)
 	return bar
+
+
+## A one-row control in the bar, centred on the two-row grids' height.
+func _bar_add(c: Control) -> void:
+	c.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_bar.add_child(c)
+
+
+func _grid(columns: int) -> GridContainer:
+	var g := GridContainer.new()
+	g.columns = columns
+	g.add_theme_constant_override("h_separation", 6)
+	g.add_theme_constant_override("v_separation", 4)
+	return g
+
+
+## Two rows, whatever the count: the twelve and any mixed ones, plus the "+".
+func _fit_colour_grid() -> void:
+	_colour_grid.columns = maxi(1, ceili((_colour_count() + 1) / 2.0))
 
 
 func _add_swatch(i: int) -> void:
 	var s := Swatch.new()
 	s.colour = _colour_at(i)
-	s.custom_minimum_size = Vector2(30, 34)
+	s.custom_minimum_size = Vector2(30, 32)
 	s.focus_mode = Control.FOCUS_ALL
 	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	s.chosen.connect(func() -> void: _choose_colour(i))
 	_swatches.append(s)
-	_bar.add_child(s)
-	# Before the "+" once it exists, so the new colour sits with the others.
-	if _add_colour != null:
-		_bar.move_child(s, _add_colour.get_index())
+	_colour_grid.add_child(s)
+	# Before the "+", so the new colour sits with the others.
+	_colour_grid.move_child(s, _add_colour.get_index())
 
 
 func _build_picker() -> void:
@@ -365,6 +398,7 @@ func _rebuild_swatches() -> void:
 	_swatches = []
 	for i in _colour_count():
 		_add_swatch(i)
+	_fit_colour_grid()
 
 
 func _load_custom() -> void:
