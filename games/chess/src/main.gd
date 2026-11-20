@@ -117,6 +117,12 @@ const DUMP_PIECES_FLAG: String = "--dump-pieces"
 ## card sits at 59.
 const BENCH_FLAG: String = "--bench"
 
+## The game plays itself, every training aid on, in a loop (ChessDemo). For a
+## screen with nobody at it. A demo never writes the player's prefs and never
+## reports a game.
+const DEMO_FLAG: String = "--demo"
+var _demo: ChessDemo = null
+
 
 func _game_ready() -> void:
 	var dump_to: String = _flag_value(DUMP_PIECES_FLAG)
@@ -168,7 +174,14 @@ func _game_ready() -> void:
 	_build_ui()
 	resized.connect(_relayout)
 	_relayout()
-	if _flag_value(BENCH_FLAG) != "":
+	if _flag_value(DEMO_FLAG) != "":
+		# A demo is watched, not played: no input reaches the idle timer, and
+		# with keep_screen_on off (project.godot) the Pi blanked it after five
+		# minutes. Held awake only while a demo runs.
+		DisplayServer.screen_set_keep_on(true)
+		_demo = ChessDemo.new(self)
+		add_child(_demo)
+	elif _flag_value(BENCH_FLAG) != "":
 		_start_game()
 	else:
 		_show_setup()
@@ -231,6 +244,8 @@ func _load_prefs() -> void:
 func _save_prefs() -> void:
 	## Only keys passed through set_value are written, which is why the MQTT
 	## password never ends up in user://config.cfg. See QConfig.
+	if _demo != null:
+		return  # the demo's forced settings are not the player's
 	QConfig.set_value("chess/side", _pref_side)
 	QConfig.set_value("chess/level", _pref_level)
 	QConfig.set_value("chess/level_scale", LEVEL_SCALE)
@@ -715,6 +730,19 @@ func _start_game() -> void:
 	_maybe_think()
 
 
+func _start_demo() -> void:
+	## A demo game: the player's side is White, every aid is on. In memory
+	## only; _save_prefs() is a no-op while a demo runs.
+	_pref_side = B.WHITE
+	_pref_training = true
+	_pref_train_danger = true
+	_pref_train_attack = true
+	_pref_train_hover = true
+	_pref_train_chains = true
+	_pref_train_checks = true
+	_start_game()
+
+
 func _clear_overlay(field: String) -> void:
 	var node: Control = get(field)
 	if node != null:
@@ -763,7 +791,7 @@ const CHECK_HOLD_MS: int = 3000
 
 
 func _maybe_think() -> void:
-	if _game.over or _game.is_human_turn():
+	if _game.over or _game.is_human_turn() or _demo != null:
 		_update_status()
 		return
 	_board_view.clear_hint()
@@ -1372,6 +1400,8 @@ func _publish(game: ChessGame) -> void:
 	## point of putting a game on a broker is that a dashboard which restarts
 	## an hour later still has the last game; a scalar reading would be stale,
 	## but the last game played is the last game played until another one is.
+	if _demo != null:
+		return
 	var score: int = int(ceil(game.records.size() / 2.0))
 	Telemetry.report_result(
 		game.telemetry_result(), score, "moves",
