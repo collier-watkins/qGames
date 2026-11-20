@@ -58,7 +58,6 @@ const PALETTE: Array = [
 const ICON_UNDO := preload("res://assets/undo.svg")
 const ICON_REDO := preload("res://assets/redo.svg")
 const ICON_BUCKET := preload("res://assets/bucket.svg")
-const ICON_ERASER := preload("res://assets/eraser.svg")
 const ICON_SAVE := preload("res://assets/save.svg")
 const ICON_CLEAR := preload("res://assets/clear.svg")
 
@@ -66,7 +65,6 @@ const ICON_CLEAR := preload("res://assets/clear.svg")
 ## earlier attempt reused the 64px cursor art and it simply never appeared.
 const ICON_TOOL: Array = [
 	preload("res://assets/tool_brush.svg"),
-	preload("res://assets/tool_eraser.svg"),
 	preload("res://assets/tool_fill.svg"),
 ]
 
@@ -77,7 +75,9 @@ const BRUSH_SIZES: Array = [3, 8, 18, 34]
 const MAX_CUSTOM: int = 12
 const CUSTOM_KEY: String = "paint/custom_colours"
 
-enum Tool { BRUSH, ERASER, FILL }
+## No eraser (removed 2026-11-20, owner: redundant): the white swatch with a
+## square brush rubs out exactly as it did, and the paper is white.
+enum Tool { BRUSH, FILL }
 
 var _canvas: PaintCanvas
 var _view: CanvasView
@@ -86,7 +86,7 @@ var _status: Label
 var _tool: int = Tool.BRUSH
 var _colour_index: int = 0
 var _size_index: int = 1
-## The brush's shape. The eraser is always square, whatever this says.
+## The brush's shape.
 var _square_brush: bool = false
 var _custom: Array[Color] = []
 var _strokes: int = 0
@@ -173,7 +173,7 @@ func _colour_at(index: int) -> Color:
 
 
 func brush_square() -> bool:
-	return _square_brush or _tool == Tool.ERASER
+	return _square_brush
 
 
 func brush_radius() -> int:
@@ -239,8 +239,8 @@ func _build_toolbar() -> Control:
 	_bar = bar
 
 	_tool_buttons = []
-	for tool in [Tool.BRUSH, Tool.ERASER, Tool.FILL]:
-		var label: String = ["Brush", "Eraser", "Fill"][tool]
+	for tool in [Tool.BRUSH, Tool.FILL]:
+		var label: String = ["Brush", "Fill"][tool]
 		var b := _make_button(label, func() -> void: _choose_tool(tool), true)
 		# The picture matters more than the word: a four-year-old who cannot
 		# read still knows which one is the brush.
@@ -289,8 +289,8 @@ func _build_toolbar() -> Control:
 
 	_bar_add(_separator())
 
-	# Undo and redo side by side, along the top; Clear over Save. All four in
-	# a row ran past 1024 and Save wrapped onto a line of its own.
+	# Undo and redo side by side, Clear and Save side by side (owner,
+	# 2026-11-20). Room for it since the eraser went.
 	var history := _grid(2)
 	_undo_button = _make_icon_button(ICON_UNDO, _on_undo, "Undo  (Ctrl+Z)")
 	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")
@@ -299,7 +299,7 @@ func _build_toolbar() -> Control:
 	bar.add_child(history)
 	# The words and a picture: the X and the floppy disk are read by a child
 	# who cannot read "Clear" and "Save" yet.
-	var files := _grid(1)
+	var files := _grid(2)
 	var clear := _make_button("Clear", _on_clear, false)
 	clear.icon = ICON_CLEAR
 	files.add_child(clear)
@@ -507,9 +507,6 @@ func _choose_size(index: int, square: bool = _square_brush) -> void:
 
 func _choose_colour(index: int) -> void:
 	_colour_index = clampi(index, 0, _colour_count() - 1)
-	# Picking a colour means you want to draw with it, not rub it out.
-	if _tool == Tool.ERASER:
-		_tool = Tool.BRUSH
 	_refresh()
 	_view.grab_focus()
 
@@ -585,7 +582,7 @@ func _refresh() -> void:
 		b.queue_redraw()
 	for i in _swatches.size():
 		var s = _swatches[i]
-		s.selected = i == _colour_index and _tool != Tool.ERASER
+		s.selected = i == _colour_index
 		s.queue_redraw()
 
 	_undo_button.disabled = not _canvas.can_undo()
@@ -814,8 +811,8 @@ class CanvasView extends Control:
 		elif _pointer_on_paper:
 			_draw_tool(_pointer, false)
 
-	## The pointer IS the tool: a circle the size of the brush, a white block
-	## for the eraser, a tipped bucket for fill. Drawn at the on-screen scale,
+	## The pointer IS the tool: the brush's circle or square at its size, a
+	## tipped bucket for fill. Drawn at the on-screen scale,
 	## so what is outlined is exactly what will be marked — which is the whole
 	## point of doing this rather than setting an OS cursor, since the canvas
 	## is scaled to fit the window.
@@ -833,13 +830,6 @@ class CanvasView extends Control:
 				# A drop of the chosen colour where the paint will land.
 				draw_circle(at, 5.0, game.colour(), true)
 				draw_arc(at, 5.0, 0.0, TAU, 14, C_INK, 1.6, true)
-			game.Tool.ERASER:
-				var half: float = maxf(5.0, float(game.brush_radius()) * _scale)
-				var box := Rect2(at - Vector2(half, half), Vector2(half, half) * 2.0)
-				# White fill with a dark outline: white alone vanishes on the
-				# paper, which is the only place it is ever used.
-				draw_rect(box, Color(1, 1, 1, 0.85), true)
-				draw_rect(box, C_INK, false, 2.0, true)
 			_:
 				var r: float = maxf(2.0, float(game.brush_radius()) * _scale)
 				# Two outlines, light over dark, so the outline stays visible on
@@ -860,12 +850,6 @@ class CanvasView extends Control:
 		match game._tool:
 			game.Tool.FILL:
 				canvas.fill(at, game.colour())
-			game.Tool.ERASER:
-				# Square, matching the block drawn under the pointer.
-				if joined:
-					canvas.stroke(from, at, game.brush_radius(), C_PAPER, true)
-				else:
-					canvas.dab(at, game.brush_radius(), C_PAPER, true)
 			_:
 				var sq: bool = game.brush_square()
 				if joined:
