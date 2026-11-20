@@ -137,6 +137,9 @@ var _explained: String = ""
 ## On checkmate, the squares round the mated king and what holds each one
 ## (ChessBoard.king_trap): drawn as the net the king is caught in.
 var _trap: Array = []
+## In check: each piece that has a way out, from-square → its target squares
+## (in check every legal move is a way out).
+var _answers: Dictionary = {}
 ## The checkmate show: seconds since the mating move landed, or -1. The trap
 ## is shown first, then the mated king topples and, when the player won,
 ## confetti flies; mate_done is sent at MATE_DWELL or on a tap.
@@ -234,6 +237,7 @@ func _refresh_maps(position_changed: bool = true) -> void:
 		_check = {}
 		_check_text = ""
 		_trap = []
+		_answers = {}
 		# A checkmate is always shown as the trap it is, aid or not: it is the
 		# one position every player should be able to read.
 		if board != null and (checks_on or _mate_t >= 0.0):
@@ -241,8 +245,17 @@ func _refresh_maps(position_changed: bool = true) -> void:
 			_check_text = explain_check(board, _check, _human_side())
 			if _is_stuck():
 				_trap = board.king_trap()
+			elif not _check.is_empty():
+				for m: int in board.legal_moves():
+					var f: int = B.move_from(m)
+					if not _answers.has(f):
+						_answers[f] = []
+					(_answers[f] as Array).append(B.move_to(m))
 	_refresh_chain()
-	if board == null:
+	# In check, with the check aid up, getting out is the only thing to show:
+	# the danger and attack washes and the take chains go quiet, or pointing
+	# at a piece brought three aids' worth of marks at once.
+	if board == null or not _check.is_empty():
 		return
 	var p: int = board.board[_inspect] if _inspect >= 0 else 0
 	if p != 0:
@@ -262,7 +275,8 @@ func _refresh_maps(position_changed: bool = true) -> void:
 
 func _refresh_chain() -> void:
 	_chain = {}
-	if board != null and chains_for != 0 and _inspect >= 0 and board.board[_inspect] != 0:
+	if board != null and chains_for != 0 and _check.is_empty() and _inspect >= 0 \
+			and board.board[_inspect] != 0:
 		_chain = board.take_chain(_inspect)
 	_chain_text = explain_chain(board, _inspect, _chain, chains_for)
 	var parts: PackedStringArray = PackedStringArray()
@@ -959,6 +973,18 @@ func _draw() -> void:
 					Color(C_CHECK, (0.22 + 0.16 * pulse) * lit))
 			draw_circle(kr.get_center(), _square * 0.40, Color(C_CHECK, (0.38 + 0.14 * pulse) * lit))
 
+	# Why check: a soft green glow under each piece that can get out of it.
+	# Only the pieces: where each one can go waits until it is pointed at
+	# (_draw_escapes), or the board fills with boxes and dots that do not say
+	# which piece they belong to.
+	if not _answers.is_empty() and _slides.is_empty():
+		for f: int in _answers:
+			var fc: Vector2 = square_rect(f).get_center()
+			if absi(board.board[f]) == B.KING:
+				draw_arc(fc, _square * 0.47, 0.0, TAU, 40, C_ESCAPE, _square * 0.06, true)
+			else:
+				draw_circle(fc, _square * 0.42, Color(C_ESCAPE, 0.38))
+
 	if selected >= 0 and _select_t > 0.0:
 		var light_sel: bool = (B.file_of(selected) + B.rank_of(selected)) % 2 == 1
 		var sel: Color = C_LIGHT_SELECT if light_sel else C_DARK_SELECT
@@ -1159,23 +1185,28 @@ func _draw_check_why() -> void:
 		_draw_escapes(found)
 
 
-func _draw_escapes(found: Array) -> void:
-	## The ways out, in green: a dot where the king can step (a ring where it
-	## steps by taking), a box on each square a block can go to, and an arrow
-	## from each piece that can take the checker.
-	var line_w: float = maxf(2.0, _square * 0.06)
-	for t: int in _check["king_moves"]:
-		var c: Vector2 = square_rect(t).get_center()
-		if board.board[t] != 0:
-			draw_arc(c, _square * 0.40, 0.0, TAU, 32, C_ESCAPE, _square * 0.07, true)
-		else:
-			draw_circle(c, _square * 0.15, C_ESCAPE)
-	for t: int in _check["blocks"]:
-		draw_rect(square_rect(t).grow(-_square * 0.12), C_ESCAPE, false, line_w)
-	if found.size() == 1:
-		var target: int = int(found[0]["from"])
-		for f: int in _check["takers"]:
-			_draw_arrow_coloured(_arrow_points(f, target), C_ESCAPE, 0.06)
+func _draw_escapes(_found: Array) -> void:
+	## The pointed-at piece's ways out, in green: an arrow to each square it
+	## can block on or to the checker it can take; for the king, a dot where
+	## it can step (a ring where it steps by taking). Not for a selected piece:
+	## its move dots already are exactly these squares.
+	if not _answers.has(_inspect) or _inspect == selected:
+		return
+	var tos: Array = _answers[_inspect]
+	if absi(board.board[_inspect]) == B.KING:
+		for t: int in tos:
+			var c: Vector2 = square_rect(t).get_center()
+			if board.board[t] != 0:
+				draw_arc(c, _square * 0.40, 0.0, TAU, 32, C_ESCAPE, _square * 0.07, true)
+			else:
+				draw_circle(c, _square * 0.15, C_ESCAPE)
+		return
+	var seen: Dictionary = {}
+	for t: int in tos:
+		if seen.has(t):
+			continue  # one arrow for the four promotions to the same square
+		seen[t] = true
+		_draw_arrow_coloured(_arrow_points(_inspect, t), C_ESCAPE, 0.07)
 
 
 func _draw_trap(found: Array) -> void:

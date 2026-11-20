@@ -1978,10 +1978,15 @@ covers either side's check: the one the player gets and the one the player gives
   (`ChessOpponent.think(..., hold_ms)`), or the picture would be gone within half a second. Its clock runs
   meanwhile. During that wait the status reads "You have given check", not "Thinking...".
 - **Training card.** It has five aids, and the descriptions were cut to two lines each so the card fits 1280x720 with Done visible and no scrollbar (screenshot `06a_training_card`).
-- **Ways out on the board (2026-11-19), in green, for either side's check:**
-  - a dot where the king can step, or a ring where it steps by taking;
-  - a box on each square a block can go to;
-  - an arrow from each piece that can take the checker.
+- **Ways out on the board (2026-11-19, reworked the same day), in green, for either side's check:**
+  - At rest, only the pieces: a soft green disc under each piece with a legal move (in check every legal move
+    is a way out), a green ring round the king if it can step. `_answers` maps from-square to targets.
+  - Pointing at one (hover, tap or keyboard cursor, i.e. `_inspect`) shows its ways out: arrows to its block or
+    take squares, dots (rings for a take) for the king. Not for the selected piece: its move dots already are
+    exactly those squares.
+  - Rejected: every block square boxed, every king step dotted and every taker arrowed at once. The owner found
+    it noisy and could not tell which piece a green box was for.
+  - While the check aid is up, the danger/attack washes, take chains and "!" badges go quiet.
 - **Checkmate as a trap (2026-11-19).**
   - `ChessBoard.king_trap()` takes each square round the mated king and records whether its own piece is in the
     way, and which enemy pieces cover it. It asks with the king lifted off the board, so the square behind the king

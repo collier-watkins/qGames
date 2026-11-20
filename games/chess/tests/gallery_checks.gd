@@ -8,7 +8,7 @@ extends SceneTree
 const B := preload("res://src/board.gd")
 const CELL := 512.0
 
-## [label, fen, last move "e2e4" or "", mate show time or -1]
+## [label, fen, last move "e2e4" or "", mate show time or -1, pointed-at square (optional)]
 const CASES: Array = [
 	["rook check, open", "4k3/8/8/8/8/8/3PP3/r3K3 w - - 0 1", "a8a1", -1.0],
 	["bishop check, b4", "4k3/8/8/8/1b6/P7/8/1N2K3 w - - 0 1", "f8b4", -1.0],
@@ -18,6 +18,8 @@ const CASES: Array = [
 	["opening Bb5+ (them)", "rnbqkbnr/ppp1pppp/3p4/1B6/4P3/8/PPPP1PPP/RNBQK1NR b KQkq - 1 2", "f1b5", -1.0],
 	["middlegame check", "r1b2rk1/pp3ppp/2n5/3q4/1b1P4/5N2/PP3PPP/RNBQKB1R w KQ - 0 1", "e7b4", -1.0],
 	["queen check, many", "r3k2r/ppp2ppp/2n5/8/8/2N5/PPPq1PPP/R2QKB1R w KQkq - 0 1", "d8d2", -1.0],
+	["middlegame, point Nf3", "r1b2rk1/pp3ppp/2n5/3q4/1b1P4/5N2/PP3PPP/RNBQKB1R w KQ - 0 1", "e7b4", -1.0, "f3"],
+	["middlegame, point king", "r1b2rk1/pp3ppp/2n5/3q4/1b1P4/5N2/PP3PPP/RNBQKB1R w KQ - 0 1", "e7b4", -1.0, "e1"],
 	["back rank mate", "R5k1/5ppp/8/8/8/8/8/6K1 b - - 0 1", "a1a8", -1.0],
 	["smothered mate", "6rk/5Npp/8/8/8/8/8/6K1 b - - 0 1", "e5f7", -1.0],
 	["Qg7 mate, bishop", "6k1/6Q1/5B2/8/8/8/8/6K1 b - - 0 1", "g3g7", -1.0],
@@ -62,6 +64,8 @@ func _build_page() -> void:
 		var t: int = B.square_from_name(mv.substr(2, 2)) if mv != "" else -1
 		v.show_position(b, f, t)
 		v.set_training(B.BLACK, B.WHITE, true, B.WHITE, true)
+		if c.size() > 4:
+			v.set_inspect(B.square_from_name(c[4]))
 		if float(c[3]) >= 0.0:
 			v.celebrate_mate(true)
 			v._mate_t = float(c[3])

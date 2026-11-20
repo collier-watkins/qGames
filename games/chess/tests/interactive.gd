@@ -490,6 +490,11 @@ func _stage_check_received() -> bool:
 	var check: Dictionary = _board.get("_check")
 	_ck("...and its ways out are on the board", [_names(check["blocks"]), _names(check["takers"])],
 			[["c3", "d2"], ["a3"]])
+	# On the board only the pieces that can answer glow (a3 pawn, b1 knight,
+	# the king); each one's squares wait to be pointed at.
+	var answers: Array = (_board.get("_answers") as Dictionary).keys()
+	answers.sort()
+	_ck("...the pieces that can answer are marked", _names(PackedInt32Array(answers)), ["a3", "b1", "e1"])
 	_play_mate()
 	_wait(1000)
 	return false
