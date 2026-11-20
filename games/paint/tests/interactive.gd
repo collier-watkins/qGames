@@ -29,6 +29,7 @@ func _initialize() -> void:
 	root.add_child(_game)
 	_steps = [
 		_stage_toolbar,
+		_stage_full_palette,
 		_stage_square_pick,
 		_stage_square_drawn,
 		_stage_picker_open,
@@ -142,6 +143,10 @@ func _pixel(px: Vector2i) -> Color:
 func _stage_toolbar() -> bool:
 	_view = _game.get("_view")
 	_saved_custom = root.get_node("QConfig").get_value(CUSTOM_KEY, PackedStringArray())
+	# From the twelve alone, whatever the player has mixed: the layout checks
+	# below depend on how many colours there are.
+	(_game.get("_custom") as Array).clear()
+	_game.call("_rebuild_swatches")
 	var bar: Control = _game.get("_bar")
 	var clear_b: Button = null
 	var save_b: Button = null
@@ -152,17 +157,35 @@ func _stage_toolbar() -> bool:
 			save_b = c
 	_ck_true("Clear carries its X", clear_b != null and clear_b.icon != null)
 	_ck_true("Save carries its floppy disk", save_b != null and save_b.icon != null)
-	# One line at the design size: every bar child on the first row.
-	var top: float = bar.get_child(0).position.y
-	var one_line := true
-	for c in bar.get_children():
-		if (c as Control).position.y > top + 40.0:
-			one_line = false
-	_ck_true("the toolbar fits one line at 1024 wide", one_line)
+	_ck_true("the toolbar fits one line at 1024 wide", _one_line())
+	# And with every mixed-colour slot full: a third row, not a wider bar.
+	var full: Array = _game.get("_custom")
+	for i in int(_game.get("MAX_CUSTOM")):
+		full.append(Color.from_hsv(i / 11.0, 0.7, 0.9))
+	_game.call("_rebuild_swatches")
 	_ck("eight size buttons, four round and four square", (_game.get("_size_buttons") as Array).size(), 8)
 	_ck("six tools: brush, fill, dropper, line, box, oval", (_game.get("_tool_buttons") as Array).size(), 6)
 	_shot("p1_toolbar")
 	_wait(200)
+	return false
+
+
+func _one_line() -> bool:
+	var bar: Control = _game.get("_bar")
+	var top: float = bar.get_child(0).position.y
+	for c in bar.get_children():
+		if (c as Control).position.y > top + 40.0:
+			return false
+	return true
+
+
+func _stage_full_palette() -> bool:
+	_ck_true("...still one line with every colour slot full", _one_line())
+	_ck("...the colours in three rows", (_game.get("_colour_grid") as GridContainer).columns, 8)
+	_shot("p1b_full_palette")
+	(_game.get("_custom") as Array).clear()
+	_game.call("_rebuild_swatches")
+	_wait(150)
 	return false
 
 

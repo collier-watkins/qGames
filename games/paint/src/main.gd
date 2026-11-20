@@ -80,8 +80,11 @@ const TOOL_TIPS: Array = ["Brush", "Fill", "Colour dropper", "Line", "Box", "Ova
 const BRUSH_SIZES: Array = [3, 8, 18, 34]
 
 ## Colours mixed in the picker, after the twelve. Kept between sessions; at the
-## cap the oldest goes, so the toolbar cannot grow without end.
-const MAX_CUSTOM: int = 12
+## cap the oldest goes, so the toolbar cannot grow without end. 11 because the
+## colour grid is at most 8 wide (any wider and the toolbar wraps at 1024) and
+## at most 3 rows: 12 + 11 + the "+" is 24 cells.
+const MAX_CUSTOM: int = 11
+const COLOUR_COLUMNS_MAX: int = 8
 const CUSTOM_KEY: String = "paint/custom_colours"
 
 ## No eraser (removed 2026-11-20, owner: redundant): the white swatch with a
@@ -313,6 +316,8 @@ func _build_toolbar() -> Control:
 	_bar_add(_separator())
 
 	_colour_grid = _grid(1)
+	# Chips a little narrower than the buttons, so eight columns fit.
+	_colour_grid.add_theme_constant_override("h_separation", 4)
 	bar.add_child(_colour_grid)
 	# Mixing a colour of their own: the full picker, in a popup so the toolbar
 	# stays a set of things to tap. Last cell of the colour grid.
@@ -328,17 +333,14 @@ func _build_toolbar() -> Control:
 
 	_bar_add(_separator())
 
-	# Undo and redo side by side, Clear and Save side by side (owner,
-	# 2026-11-20). Room for it since the eraser went.
-	var history := _grid(2)
-	_undo_button = _make_icon_button(ICON_UNDO, _on_undo, "Undo  (Ctrl+Z)")
-	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")
-	history.add_child(_undo_button)
-	history.add_child(_redo_button)
-	bar.add_child(history)
+	# Open, Clear and Save along the top, undo and redo beneath them (owner,
+	# 2026-11-20): two rows, like the grids beside them.
+	var actions := VBoxContainer.new()
+	actions.add_theme_constant_override("separation", 4)
 	# The words and a picture: the X and the floppy disk are read by a child
 	# who cannot read "Clear" and "Save" yet.
-	var files := _grid(3)
+	var files := HBoxContainer.new()
+	files.add_theme_constant_override("separation", 6)
 	var open := _make_button("Open", _open_gallery, false)
 	open.icon = ICON_OPEN
 	files.add_child(open)
@@ -349,7 +351,16 @@ func _build_toolbar() -> Control:
 	var save := _make_button("Save", _on_save, false)
 	save.icon = ICON_SAVE
 	files.add_child(save)
-	bar.add_child(files)
+	actions.add_child(files)
+	var history := HBoxContainer.new()
+	history.add_theme_constant_override("separation", 6)
+	_undo_button = _make_icon_button(ICON_UNDO, _on_undo, "Undo  (Ctrl+Z)")
+	_redo_button = _make_icon_button(ICON_REDO, _on_redo, "Redo  (Ctrl+Shift+Z)")
+	for b: Button in [_undo_button, _redo_button]:
+		b.custom_minimum_size = Vector2(40, 32)
+		history.add_child(b)
+	actions.add_child(history)
+	bar.add_child(actions)
 	return bar
 
 
@@ -367,15 +378,19 @@ func _grid(columns: int) -> GridContainer:
 	return g
 
 
-## Two rows, whatever the count: the twelve and any mixed ones, plus the "+".
+## Two rows while they fit, a third once the mixed colours need it: wider
+## than COLOUR_COLUMNS_MAX and the whole toolbar wraps (found when a few mixed
+## colours pushed Save onto a line of its own). Rows are kept even.
 func _fit_colour_grid() -> void:
-	_colour_grid.columns = maxi(1, ceili((_colour_count() + 1) / 2.0))
+	var cells: int = _colour_count() + 1
+	var rows: int = maxi(2, ceili(cells / float(COLOUR_COLUMNS_MAX)))
+	_colour_grid.columns = maxi(1, ceili(cells / float(rows)))
 
 
 func _add_swatch(i: int) -> void:
 	var s := Swatch.new()
 	s.colour = _colour_at(i)
-	s.custom_minimum_size = Vector2(30, 32)
+	s.custom_minimum_size = Vector2(27, 32)
 	s.focus_mode = Control.FOCUS_ALL
 	s.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	s.chosen.connect(func() -> void: _choose_colour(i))
@@ -1032,6 +1047,20 @@ class CanvasView extends Control:
 	func _draw_tool(at: Vector2, active: bool) -> void:
 		var game = owner_game
 		match game._tool:
+			game.Tool.LINE, game.Tool.RECT, game.Tool.ELLIPSE:
+				# A crosshair, MS Paint's shape cursor: a shape starts at a
+				# point, and a brush-sized outline hides exactly which one.
+				# Light under dark so it reads on any colour; open in the
+				# middle so the pixel itself stays visible.
+				var arm: float = 11.0
+				var gap: float = 3.0
+				for pass_w: Array in [[Color(1, 1, 1, 0.9), 4.0], [C_INK, 1.8]]:
+					var c: Color = pass_w[0]
+					var w: float = pass_w[1]
+					draw_line(at + Vector2(-arm, 0), at + Vector2(-gap, 0), c, w, true)
+					draw_line(at + Vector2(gap, 0), at + Vector2(arm, 0), c, w, true)
+					draw_line(at + Vector2(0, -arm), at + Vector2(0, -gap), c, w, true)
+					draw_line(at + Vector2(0, gap), at + Vector2(0, arm), c, w, true)
 			game.Tool.DROPPER:
 				# The colour under the tip, in a disc beside it, so the child
 				# sees what they are about to take before they take it.
